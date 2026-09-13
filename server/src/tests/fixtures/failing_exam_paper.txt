@@ -1,0 +1,18 @@
+CENTRAL BOARD OF SECONDARY EDUCATION
+FINAL EXAMINATION 2026 - PHYSICS (PAPER II)
+Time Allowed: 3 Hours
+Maximum Marks: 100
+
+General Instructions:
+1. Read the question paper carefully.
+2. Section A contains 10 objective questions of 1 mark each.
+3. Section B contains 5 short answer questions of 3 marks each.
+4. Section C contains 3 long answer questions of 5 marks each.
+
+SECTION A
+Q1. What is the SI unit of electrical resistance?
+(A) Volt  (B) Ohm  (C) Ampere  (D) Watt
+
+Q2. State Newton's Second Law of Motion and derive F = ma.
+
+Q3. Explain the phenomenon of Total Internal Reflection with a suitable ray diagram.
