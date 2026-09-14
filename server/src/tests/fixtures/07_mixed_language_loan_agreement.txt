@@ -1,0 +1,19 @@
+ऋण समझौता / LOAN AGREEMENT
+
+यह ऋण समझौता (Loan Agreement) दिनांक 10 मई 2026 को निष्पादित किया गया है:
+लेंडर / LENDER: श्री राजेश वर्मा (Mr. Rajesh Verma), निवासी नई दिल्ली।
+उधारकर्ता / BORROWER: श्री अमित शर्मा (Mr. Amit Sharma), निवासी नोएडा।
+
+1. PRINCIPAL LOAN AMOUNT / ऋण राशि
+The Lender agrees to grant a loan of Rs. 5,00,000 (पांच लाख रुपये) to the Borrower.
+उधारकर्ता इस ऋण राशि को स्वीकार करता है।
+
+2. INTEREST RATE & REPAYMENT / ब्याज दर और पुनर्भुगतान
+The Borrower agrees to repay the principal amount along with interest at the rate of 12% per annum (12% वार्षिक ब्याज दर).
+भुगतान अवधि 24 महीने (24 months) होगी।
+
+3. DEFAULT AND PENALTY / व्यतिक्रम और शास्ती
+In case of delay in payment, a late penalty of 2% per month (2% प्रति माह विलंब शुल्क) shall be charged on the overdue amount.
+
+4. GOVERNING LAW & JURISDICTION / शासी विधि
+This Agreement shall be governed by the laws of India. Courts in Delhi (दिल्ली न्यायालय) shall have exclusive jurisdiction.

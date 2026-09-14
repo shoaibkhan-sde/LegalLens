@@ -163,3 +163,58 @@ label,
 .hover-robo-smile:hover {
   animation: roboSmileBounce 650ms ease-in-out forwards;
 }
+
+/* Cool Built For Everyone Section Animations */
+@keyframes coolHeroFloat {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes textGradientShimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.animate-cool-float {
+  animation: coolHeroFloat 4.5s ease-in-out infinite;
+}
+
+.cool-shimmer-title {
+  background: linear-gradient(135deg, #1E1B17 0%, #B85C38 50%, #1E1B17 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: textGradientShimmer 5s ease infinite;
+}
+
+/* Footer Subtle Linework Drift Animation */
+@keyframes footerLineworkDrift {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+.animate-footer-drift {
+  animation: footerLineworkDrift 38s linear infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-footer-drift {
+    animation: none !important;
+  }
+}

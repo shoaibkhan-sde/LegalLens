@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { MapPin, Phone, Shield, ExternalLink, Search, Info, Clock, Globe } from 'lucide-react';
 
+import { useLanguage } from '../context/LanguageContext';
+
 interface DLSACenter {
   state: string;
   district: string;
@@ -46,6 +48,7 @@ const SAMPLE_DLSA_CENTERS: DLSACenter[] = [
 ];
 
 export const LegalAidLocator: React.FC = () => {
+  const { t } = useLanguage();
   const [selectedState, setSelectedState] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -72,10 +75,10 @@ export const LegalAidLocator: React.FC = () => {
               </div>
               <div>
                 <h2 className="text-base sm:text-lg font-bold font-heading text-[#1E1B17]">
-                  Free Legal Aid Services (NALSA / DLSA)
+                  {t('legal_aid.title')}
                 </h2>
                 <p className="text-xs text-[#6E6659] leading-relaxed">
-                  Connect with licensed Advocates & Legal Aid Authorities across India under Section 12 of the Legal Services Authorities Act, 1987.
+                  {t('legal_aid.subtitle')}
                 </p>
               </div>
             </div>
@@ -87,9 +90,9 @@ export const LegalAidLocator: React.FC = () => {
                   <Phone className="w-5.5 h-5.5 animate-pulse" />
                 </div>
                 <div>
-                  <div className="text-[10px] font-bold uppercase text-[#6EE7B7] tracking-wider">NALSA National Toll-Free Helpline</div>
+                  <div className="text-[10px] font-bold uppercase text-[#6EE7B7] tracking-wider">{t('legal_aid.helpline_tag')}</div>
                   <div className="text-xl sm:text-2xl font-bold font-mono text-white tracking-wide">15100</div>
-                  <p className="text-[11px] text-slate-300">Toll-free 24/7 legal assistance provided by National Legal Services Authority</p>
+                  <p className="text-[11px] text-slate-300">{t('legal_aid.helpline_sub')}</p>
                 </div>
               </div>
 
@@ -98,7 +101,7 @@ export const LegalAidLocator: React.FC = () => {
                 className="px-4 py-2 bg-[#6EE7B7] hover:bg-[#A7F3D0] text-[#065F46] font-bold text-xs rounded-lg shadow-sm flex items-center space-x-1.5 transition-colors shrink-0"
               >
                 <Phone className="w-3.5 h-3.5 animate-pulse" />
-                <span>Call 15100 Now</span>
+                <span>{t('legal_aid.call_now')}</span>
               </a>
             </div>
 
@@ -106,15 +109,15 @@ export const LegalAidLocator: React.FC = () => {
             <div className="flex flex-wrap items-center gap-2 pt-0.5">
               <span className="text-[11px] font-medium text-[#1E1B17] bg-[#FBF8F1] px-2.5 py-1 rounded border border-[#E7E1D3] flex items-center space-x-1">
                 <Shield className="w-3 h-3 text-[#B85C38]" />
-                <span>Free Representation</span>
+                <span>{t('legal_aid.badge_rep')}</span>
               </span>
               <span className="text-[11px] font-medium text-[#1E1B17] bg-[#FBF8F1] px-2.5 py-1 rounded border border-[#E7E1D3] flex items-center space-x-1">
                 <Clock className="w-3 h-3 text-[#065F46]" />
-                <span>24/7 Availability</span>
+                <span>{t('legal_aid.badge_247')}</span>
               </span>
               <span className="text-[11px] font-medium text-[#1E1B17] bg-[#FBF8F1] px-2.5 py-1 rounded border border-[#E7E1D3] flex items-center space-x-1">
                 <Globe className="w-3 h-3 text-[#B85C38]" />
-                <span>All India Coverage</span>
+                <span>{t('legal_aid.badge_coverage')}</span>
               </span>
             </div>
           </div>
@@ -138,7 +141,7 @@ export const LegalAidLocator: React.FC = () => {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search district or court office..."
+              placeholder={t('legal_aid.search_placeholder')}
               className="w-full bg-[#F6F1E7] border border-[#E7E1D3] rounded-lg pl-8 pr-3.5 py-2 text-xs text-[#1E1B17] focus:outline-none focus:border-[#B85C38]"
             />
           </div>
@@ -148,7 +151,7 @@ export const LegalAidLocator: React.FC = () => {
             onChange={(e) => setSelectedState(e.target.value)}
             className="bg-[#F6F1E7] border border-[#E7E1D3] rounded-lg px-3 py-2 text-xs text-[#1E1B17] focus:outline-none focus:border-[#B85C38]"
           >
-            <option value="All">All States (Karnataka, Delhi, Maharashtra, Haryana)</option>
+            <option value="All">{t('legal_aid.all_states')}</option>
             <option value="Karnataka">Karnataka</option>
             <option value="Delhi">Delhi</option>
             <option value="Maharashtra">Maharashtra</option>
@@ -201,14 +204,14 @@ export const LegalAidLocator: React.FC = () => {
             </div>
 
             <div className="pt-2 border-t border-[#E7E1D3] flex items-center justify-between text-xs">
-              <span className="text-[#6E6659] text-[11px]">Free representation for eligible citizens</span>
+              <span className="text-[#6E6659] text-[11px]">{t('legal_aid.free_rep_eligible')}</span>
               <a
                 href="https://nalsa.gov.in"
                 target="_blank"
                 rel="noreferrer"
                 className="text-[#B85C38] hover:text-[#9C4B2B] font-semibold flex items-center space-x-1 text-[11px]"
               >
-                <span>Official NALSA</span>
+                <span>{t('legal_aid.official_nalsa')}</span>
                 <ExternalLink className="w-3 h-3" />
               </a>
             </div>
@@ -221,10 +224,10 @@ export const LegalAidLocator: React.FC = () => {
       <div className="bg-[#FBF8F1] border border-[#E7E1D3] rounded-2xl p-4 text-xs text-[#1E1B17] space-y-1.5">
         <div className="flex items-center space-x-2 text-[#B85C38] font-bold">
           <Info className="w-3.5 h-3.5" />
-          <span>Who is Eligible for Free Legal Services? (Section 12, Legal Services Authorities Act, 1987)</span>
+          <span>{t('legal_aid.eligibility_title')}</span>
         </div>
         <p className="leading-relaxed text-[#6E6659]">
-          Free legal representation, advocacy, and court fee assistance are granted to Women, Children, Members of SC/ST, Industrial Workmen, Persons with Disabilities, Victims of Disasters/Violence, and individuals with annual income below prescribed state limits.
+          {t('legal_aid.eligibility_desc')}
         </p>
       </div>
     </div>

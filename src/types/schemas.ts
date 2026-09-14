@@ -190,6 +190,16 @@ export interface ComparisonResult {
   disclaimer: string;
 }
 
+export interface QuotaTelemetry {
+  totalRpm: number;
+  usedRpm: number;
+  totalTpm: number;
+  usedTpm: number;
+  resetSeconds: number;
+  activeEngine: 'Primary Engine' | 'Backup Engine';
+  isBackupAvailable: boolean;
+}
+
 export interface ChatMessage {
   id: string;
   sender: 'user' | 'assistant' | 'system';
@@ -198,9 +208,21 @@ export interface ChatMessage {
   timestamp: string;
   is_flagged_unsafe?: boolean;
   safety_reason?: string;
+  quota?: QuotaTelemetry;
 }
 
 export interface ServerConfigStatus {
   isConfigured: boolean;
   demoMode: boolean;
+  quota?: QuotaTelemetry;
+}
+
+export interface ActiveInputContext {
+  uploadedFileName?: string;
+  uploadedFileType?: string;
+  uploadedFileSize?: string;
+  pastedText?: string;
+  extractedInputText?: string;
+  capturedPhoto?: boolean;
+  hasInput?: boolean;
 }

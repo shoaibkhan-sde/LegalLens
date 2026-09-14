@@ -23,7 +23,8 @@ export class SpeechEngine {
     text: string,
     onStart?: () => void,
     onEnd?: () => void,
-    onError?: (err: any) => void
+    onError?: (err: any) => void,
+    lang: string = 'en'
   ): void {
     if (!this.synth) {
       console.warn('Speech synthesis not supported in this browser.');
@@ -38,12 +39,30 @@ export class SpeechEngine {
     utterance.rate = 0.95; // Slightly slower, clear tone for low literacy / accessibility
     utterance.pitch = 1.0;
 
-    // Pick English or Indian English voice if available
+    const isHindi = lang === 'hi' || lang === 'hi-IN';
+    utterance.lang = isHindi ? 'hi-IN' : 'en-US';
+
+    // Pick Hindi or English voice based on active language mode
     const voices = this.synth.getVoices();
-    const preferredVoice =
-      voices.find((v) => v.lang.includes('en-IN') || v.lang.includes('en_IN')) ||
-      voices.find((v) => v.lang.startsWith('en')) ||
-      voices[0];
+    let preferredVoice: SpeechSynthesisVoice | undefined;
+
+    if (isHindi) {
+      preferredVoice =
+        voices.find((v) => v.lang.includes('hi-IN') || v.lang.includes('hi_IN') || v.lang.startsWith('hi')) ||
+        voices.find((v) => v.name.toLowerCase().includes('hindi')) ||
+        voices.find((v) => v.lang.includes('IN'));
+
+      if (!preferredVoice || (!preferredVoice.lang.includes('hi') && !preferredVoice.name.toLowerCase().includes('hindi'))) {
+        console.warn('⚠️ Hindi TTS voice not found on device/browser. Falling back to default system voice with hi-IN language tag.');
+        preferredVoice = voices.find((v) => v.default) || voices[0];
+      }
+    } else {
+      preferredVoice =
+        voices.find((v) => v.lang.includes('en-IN') || v.lang.includes('en_IN')) ||
+        voices.find((v) => v.lang.startsWith('en')) ||
+        voices.find((v) => v.default) ||
+        voices[0];
+    }
 
     if (preferredVoice) {
       utterance.voice = preferredVoice;
@@ -79,7 +98,8 @@ export class SpeechEngine {
     onResult: (transcript: string) => void,
     onStart?: () => void,
     onEnd?: () => void,
-    onError?: (err: string) => void
+    onError?: (err: string) => void,
+    lang: string = 'en'
   ): { stop: () => void } | null {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -92,7 +112,8 @@ export class SpeechEngine {
     const recognition = new SpeechRecognition();
     recognition.continuous = false;
     recognition.interimResults = false;
-    recognition.lang = 'en-US';
+    const isHindi = lang === 'hi' || lang === 'hi-IN';
+    recognition.lang = isHindi ? 'hi-IN' : 'en-US';
 
     recognition.onstart = () => onStart?.();
     recognition.onend = () => onEnd?.();

@@ -11,10 +11,13 @@
     "build:client": "tsc && vite build",
     "build:server": "tsc -p server/tsconfig.json",
     "test:guardrails": "npx tsx server/src/tests/guardrails.test.ts",
+    "test:pipeline": "npx tsx server/src/tests/pipeline.test.ts",
+    "test": "npx tsx server/src/tests/guardrails.test.ts && npx tsx server/src/tests/pipeline.test.ts",
     "start": "node dist-server/index.js",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@types/qrcode": "^1.5.6",
     "clsx": "^2.1.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
@@ -23,6 +26,7 @@
     "helmet": "^8.0.0",
     "lucide-react": "^0.475.0",
     "multer": "^1.4.5-lts.1",
+    "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwind-merge": "^3.0.1",

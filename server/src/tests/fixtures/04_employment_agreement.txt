@@ -1,0 +1,15 @@
+EMPLOYMENT AGREEMENT
+
+This Employment Agreement is entered into on 15th May 2026 between TechNova Solutions Pvt Ltd ("Company") and Rahul Verma ("Employee").
+
+1. POSITION AND DUTIES
+The Employee is hired as Senior Software Engineer at the Company's Gurugram office.
+
+2. SERVICE BOND & RESIGNATION PENALTY
+The Employee agrees to serve the Company for a minimum mandatory tenure of 24 months. In the event the Employee resigns before completing 24 months of continuous service, the Employee shall be liable to pay a liquidated damages penalty of Rs. 3,00,000 for training cost recovery.
+
+3. POST-EMPLOYMENT NON-COMPETE RESTRICTION
+During employment and for a period of 24 months following termination of employment for any reason, the Employee shall not directly or indirectly engage in, perform services for, or establish any business or competitor in India that competes with the business of the Company.
+
+4. NOTICE PERIOD
+Either party may terminate this employment by providing 90 days written notice or basic salary in lieu thereof.

@@ -11,24 +11,34 @@ import {
   Sparkles,
   Search,
 } from 'lucide-react';
-import { DocumentAnalysisResult, ChatMessage } from '../types/schemas';
+import { DocumentAnalysisResult, ChatMessage, QuotaTelemetry } from '../types/schemas';
+import { ActiveInputContext } from '../types/schemas';
 import { ApiClient } from '../services/apiClient';
 import { SpeechEngine } from '../utils/speech';
+import { QuotaBar } from './QuotaBar';
+import { FormattedMessageText } from './FormattedMessageText';
+
+import { useLanguage } from '../context/LanguageContext';
 
 interface VoiceGroundedChatProps {
   document: DocumentAnalysisResult;
+  inputContext?: ActiveInputContext | null;
   onVerifyClause: (clauseId: string) => void;
 }
 
 export const VoiceGroundedChat: React.FC<VoiceGroundedChatProps> = ({
   document,
+  inputContext,
   onVerifyClause,
 }) => {
-  const [messages, setMessages] = useState<ChatMessage[]>([
+  const { language, t } = useLanguage();
+  const [messages, setMessages] = useState<ChatMessage[]>(() => [
     {
       id: 'welcome_1',
       sender: 'assistant',
-      text: `Hello! I am your LegalLens Voice Assistant. I can answer questions strictly grounded in your contract (${document.document_title}). Ask about deposit return, notice periods, or penalties!`,
+      text: language === 'hi'
+        ? `नमस्ते! मैं आपका लीगललेंस वॉयस सहायक हूँ। मैं आपके अनुबंध (${document.document_title}) के आधार पर प्रश्नों का उत्तर दे सकता हूँ!`
+        : `Hello! I am your LegalLens Voice Assistant. I can answer questions strictly grounded in your contract (${document.document_title}). Ask about deposit return, notice periods, or penalties!`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
@@ -36,6 +46,13 @@ export const VoiceGroundedChat: React.FC<VoiceGroundedChatProps> = ({
   const [isListening, setIsListening] = useState(false);
   const [activeSpeechId, setActiveSpeechId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [quotaTelemetry, setQuotaTelemetry] = useState<QuotaTelemetry | undefined>(undefined);
+
+  React.useEffect(() => {
+    ApiClient.getConfigStatus().then((st) => {
+      if (st.quota) setQuotaTelemetry(st.quota);
+    }).catch(() => {});
+  }, []);
 
   const handleSend = async (textToSend?: string) => {
     const query = textToSend || inputText;
@@ -53,7 +70,10 @@ export const VoiceGroundedChat: React.FC<VoiceGroundedChatProps> = ({
     setIsLoading(true);
 
     try {
-      const assistantMsg = await ApiClient.sendChatMessage(document, query.trim(), messages);
+      const assistantMsg = await ApiClient.sendChatMessage(document, query.trim(), messages, inputContext || null, language);
+      if (assistantMsg.quota) {
+        setQuotaTelemetry(assistantMsg.quota);
+      }
       setMessages((prev) => [...prev, assistantMsg]);
     } catch (err: any) {
       setMessages((prev) => [
@@ -61,7 +81,9 @@ export const VoiceGroundedChat: React.FC<VoiceGroundedChatProps> = ({
         {
           id: `err_${Date.now()}`,
           sender: 'assistant',
-          text: 'Sorry, I encountered an error processing your query. Please try again.',
+          text: language === 'hi'
+            ? 'क्षमा करें, आपके प्रश्न को संसाधित करने में त्रुटि हुई। कृपया पुनः प्रयास करें।'
+            : 'Sorry, I encountered an error processing your query. Please try again.',
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
@@ -86,7 +108,8 @@ export const VoiceGroundedChat: React.FC<VoiceGroundedChatProps> = ({
         (err) => {
           setIsListening(false);
           console.warn('Speech recognition error:', err);
-        }
+        },
+        language
       );
     }
   };
@@ -101,7 +124,8 @@ export const VoiceGroundedChat: React.FC<VoiceGroundedChatProps> = ({
         msg.text,
         () => setActiveSpeechId(msg.id),
         () => setActiveSpeechId(null),
-        () => setActiveSpeechId(null)
+        () => setActiveSpeechId(null),
+        language
       );
     }
   };
@@ -125,6 +149,9 @@ export const VoiceGroundedChat: React.FC<VoiceGroundedChatProps> = ({
           <span>Guardrail Safe</span>
         </span>
       </div>
+
+      {/* Live Dual Engine Telemetry Bar */}
+      <QuotaBar quota={quotaTelemetry} />
 
       {/* Messages Scroll Area */}
       <div className="flex-1 overflow-y-auto space-y-3 pr-1 max-h-[420px] text-xs">
@@ -153,7 +180,7 @@ export const VoiceGroundedChat: React.FC<VoiceGroundedChatProps> = ({
                   </div>
                 )}
 
-                <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                <FormattedMessageText text={msg.text} />
 
                 {/* Citations Tagging */}
                 {msg.cited_clause_ids && msg.cited_clause_ids.length > 0 && (

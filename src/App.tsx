@@ -12,12 +12,16 @@ import { ActionableOutputs } from './components/ActionableOutputs';
 import { LegalAidLocator } from './components/LegalAidLocator';
 import { ExplainToFriendModal } from './components/ExplainToFriendModal';
 import { RoboAiAssistant } from './components/RoboAiAssistant';
+import { Footer } from './components/Footer';
 
 import { ApiClient } from './services/apiClient';
-import { DocumentAnalysisResult, SimplifiedClause, ServerConfigStatus } from './types/schemas';
+import { DocumentAnalysisResult, SimplifiedClause, ServerConfigStatus, ActiveInputContext } from './types/schemas';
 import { ShieldCheck, Layers, AlertOctagon, Zap, Sparkles } from 'lucide-react';
 
-export function App() {
+import { LanguageProvider, useLanguage } from './context/LanguageContext';
+
+function AppContent() {
+  const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<'analyze' | 'compare' | 'legal_aid'>('analyze');
   const [readingLevel, setReadingLevel] = useState<'simple' | 'very_simple'>('simple');
   const [configStatus, setConfigStatus] = useState<ServerConfigStatus>({
@@ -27,10 +31,25 @@ export function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   const [documentAnalysis, setDocumentAnalysis] = useState<DocumentAnalysisResult | null>(null);
+  const [activeInputContext, setActiveInputContext] = useState<ActiveInputContext | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [highlightedClauseId, setHighlightedClauseId] = useState<string | null>(null);
   const [selectedShareClause, setSelectedShareClause] = useState<SimplifiedClause | null>(null);
-  const [isChatOpen, setIsChatOpen] = useState<boolean>(false);
+  const [isChatOpen, setIsChatOpen] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('legallens_is_chat_open');
+      if (saved !== null) return JSON.parse(saved);
+    } catch {}
+    return false;
+  });
+
+  const handleToggleChatOpen = (open: boolean) => {
+    setIsChatOpen(open);
+    try {
+      localStorage.setItem('legallens_is_chat_open', JSON.stringify(open));
+    } catch {}
+  };
 
   useEffect(() => {
     ApiClient.getConfigStatus().then((status) => setConfigStatus(status));
@@ -39,11 +58,12 @@ export function App() {
   const handleAnalyzeText = async (text: string, file?: File) => {
     setIsLoading(true);
     setDocumentAnalysis(null);
+    setErrorMessage(null);
     try {
       const result = await ApiClient.analyzeDocument(text, file);
       setDocumentAnalysis(result);
     } catch (err: any) {
-      alert(err.message || 'Failed to analyze document.');
+      setErrorMessage(err.message || 'System is busy, please try again in a moment.');
     } finally {
       setIsLoading(false);
     }
@@ -57,7 +77,7 @@ export function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F6F1E7] text-[#1E1B17] flex flex-col font-sans selection:bg-[#B85C38]/20 selection:text-[#B85C38]">
+    <div className="min-h-screen bg-[#F6F1E7] text-[#1E1B17] flex flex-col font-sans selection:bg-[#B85C38]/20 selection:text-[#B85C38] overflow-x-hidden">
       {/* Navigation Header */}
       <Navbar
         readingLevel={readingLevel}
@@ -69,40 +89,63 @@ export function App() {
       />
 
       {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 space-y-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 md:px-8 py-4 md:py-6 space-y-6">
         {/* Tab 1: Analyze Document Workflow */}
         {activeTab === 'analyze' && (
           <div className="space-y-6 animate-fade-in-up">
             {/* Split Hero Section with Editorial Illustration */}
             <HeroHeader />
 
+            {/* Error Message Banner */}
+            {errorMessage && (
+              <div className="bg-[#FFF5F5] border border-[#FCA5A5] rounded-xl p-4 flex items-center justify-between text-xs text-[#991B1B] shadow-xs animate-fade-in-up">
+                <div className="flex items-center space-x-2">
+                  <AlertOctagon className="w-4 h-4 text-[#B85C38] shrink-0" />
+                  <span className="font-semibold">{errorMessage}</span>
+                </div>
+                <button
+                  onClick={() => setErrorMessage(null)}
+                  className="p-1 rounded hover:bg-[#FCA5A5]/30 text-[#991B1B] font-bold text-sm transition-colors cursor-pointer"
+                  title="Dismiss message"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
             {/* Top Section Header with 3D Robo Face Avatar when chat is closed */}
             {!isChatOpen && (
               <div className="flex justify-end pr-2 -mb-4">
                 <RoboAiAssistant
                   document={documentAnalysis}
+                  inputContext={activeInputContext}
                   onVerifyClause={handleVerifyInDocument}
                   isOpen={isChatOpen}
-                  onToggleOpen={setIsChatOpen}
+                  onToggleOpen={handleToggleChatOpen}
                 />
               </div>
             )}
 
             {/* Top Section: Dynamic Grid (100% width when chat closed, 50%/50% equal area split when chat open) */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 transition-all duration-300 items-start">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 transition-all duration-300 items-stretch">
               {/* Document Capture Area */}
               <div className={`${isChatOpen ? 'lg:col-span-6' : 'lg:col-span-12'} transition-all duration-300`}>
-                <DocumentCapture onAnalyzeText={handleAnalyzeText} isLoading={isLoading} />
+                <DocumentCapture
+                  onAnalyzeText={handleAnalyzeText}
+                  isLoading={isLoading}
+                  onInputContextChange={setActiveInputContext}
+                />
               </div>
 
               {/* Chat Screen Area (Takes equal 50% width area alongside uploader when open) */}
               {isChatOpen && (
-                <div className="lg:col-span-6 transition-all duration-300 animate-fade-in-up">
+                <div className="lg:col-span-6 transition-all duration-300 animate-fade-in-up relative min-h-[500px] lg:min-h-0">
                   <RoboAiAssistant
                     document={documentAnalysis}
+                    inputContext={activeInputContext}
                     onVerifyClause={handleVerifyInDocument}
                     isOpen={isChatOpen}
-                    onToggleOpen={setIsChatOpen}
+                    onToggleOpen={handleToggleChatOpen}
                   />
                 </div>
               )}
@@ -231,23 +274,25 @@ export function App() {
             )}
 
             {/* Mission Section: Family Editorial Illustration */}
-            <div className="pt-6 pb-2 text-center space-y-3 hidden min-[360px]:block">
-              <div className="max-w-xl mx-auto space-y-1">
-                <h3 className="text-base md:text-lg font-bold font-heading text-[#1E1B17]">
-                  Built for everyone
+            <div className="mt-16 md:mt-24 pt-8 pb-6 text-center space-y-5 hidden min-[360px]:block animate-fade-in-up">
+              <div className="max-w-2xl mx-auto space-y-2.5 px-4">
+                <h3 className="text-xl sm:text-2xl md:text-3xl font-extrabold font-heading cool-shimmer-title tracking-tight">
+                  {t('hero.builtForEveryone')}
                 </h3>
-                <p className="text-xs md:text-sm text-[#6E6659] leading-relaxed">
-                  Whether you read fluently or prefer listening — LegalLens works the same way for you.
+                <p className="text-sm md:text-base text-[#6E6659] leading-relaxed font-medium max-w-lg mx-auto">
+                  {t('hero.builtForEveryoneSub')}
                 </p>
               </div>
 
-              <div className="w-full flex justify-center items-center pt-2">
-                <img
-                  src="/assets/family-illustration.png"
-                  alt="Illustration of a multi-generational family using LegalLens together"
-                  loading="lazy"
-                  className="w-full h-auto max-h-[340px] sm:max-h-[400px] md:max-h-[460px] max-w-4xl object-contain mx-auto"
-                />
+              <div className="w-full flex justify-center items-center pt-4 px-2">
+                <div className="animate-cool-float w-full max-w-4xl mx-auto">
+                  <img
+                    src="/assets/family-illustration.png"
+                    alt="Illustration of a multi-generational family using LegalLens together"
+                    loading="lazy"
+                    className="w-full h-auto max-h-[360px] sm:max-h-[420px] md:max-h-[480px] max-w-4xl object-contain mx-auto transition-transform duration-500 ease-out hover:scale-[1.02]"
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -260,15 +305,8 @@ export function App() {
         {activeTab === 'legal_aid' && <LegalAidLocator />}
       </main>
 
-      {/* High-Contrast Footer (Deep Warm Charcoal #17140F) */}
-      <footer className="bg-[#17140F] text-slate-300 py-6 px-6 text-center text-xs space-y-1.5 mt-auto border-t border-[#17140F]">
-        <p className="font-bold text-white text-sm">
-          LegalLens — GenAI Powered Solution for Legal Assistance & Access
-        </p>
-        <p className="text-[11px] text-slate-400 max-w-2xl mx-auto leading-relaxed">
-          <strong>Mandatory Statutory Disclaimer:</strong> LegalLens assists, but does not replace, professional legal advice. Under the Advocates Act 1961, no attorney-client relationship is created.
-        </p>
-      </footer>
+      {/* Premium Level Footer (#3C481D) */}
+      <Footer onSelectTab={setActiveTab} />
 
       {/* Modals */}
       <ApiKeyModal
@@ -285,6 +323,14 @@ export function App() {
         documentTitle={documentAnalysis?.document_title}
       />
     </div>
+  );
+}
+
+export function App() {
+  return (
+    <LanguageProvider>
+      <AppContent />
+    </LanguageProvider>
   );
 }
 

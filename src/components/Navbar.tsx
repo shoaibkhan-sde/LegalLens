@@ -6,8 +6,10 @@ import {
   Settings,
   AlertCircle,
   ShieldCheck,
+  Globe,
 } from 'lucide-react';
 import { ServerConfigStatus } from '../types/schemas';
+import { useLanguage } from '../context/LanguageContext';
 
 interface NavbarProps {
   readingLevel: 'simple' | 'very_simple';
@@ -24,89 +26,127 @@ export const Navbar: React.FC<NavbarProps> = ({
   configStatus,
   onOpenSettings,
 }) => {
+  const { language, setLanguage, t } = useLanguage();
+
   return (
-    <header className="sticky top-0 z-40 bg-[#FBF8F1]/95 backdrop-blur-xs border-b border-[#E7E1D3] px-3 md:px-6 py-2.5 shadow-xs">
-      <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
+    <header className="sticky top-0 z-40 bg-[#FBF8F1]/95 backdrop-blur-xs border-b border-[#E7E1D3] px-2.5 sm:px-6 py-2 shadow-xs overflow-hidden">
+      <div className="max-w-7xl mx-auto flex items-center justify-between gap-1 sm:gap-4 w-full">
         {/* Left Zone: Brand Logo & Wordmark */}
-        <div className="flex items-center space-x-3 shrink-0">
+        <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
           <img
             src="/assets/logo.png"
             alt="LegalLens Logo"
-            className="w-10 h-10 md:w-11 md:h-11 object-contain rounded-full shrink-0"
+            className="w-7 h-7 sm:w-10 sm:h-10 object-contain rounded-full shrink-0"
           />
-          <h1 className="text-[19px] md:text-[20px] font-semibold font-brand text-[#2D261E] tracking-tight leading-none">
-            Legal<span className="text-[#B85C38] font-bold">Lens</span>
-          </h1>
+          <div>
+            <h1 className="text-[17px] sm:text-[19px] md:text-[20px] font-semibold font-brand text-[#2D261E] tracking-tight leading-none hidden sm:block">
+              {t('nav.brand_title')}<span className="text-[#B85C38] font-bold">Lens</span>
+            </h1>
+            <p className="text-[9px] text-[#6E6659] hidden md:block leading-none mt-0.5">
+              {t('nav.brand_subtitle')}
+            </p>
+          </div>
         </div>
 
-        {/* Center Zone: Cohesive Tab Group (Truly Centered) */}
-        <div className="flex-1 flex justify-center items-center">
-          <nav className="flex items-center bg-[#F6F1E7] p-1 rounded-xl border border-[#E7E1D3] shadow-2xs">
+        {/* Center Zone: Cohesive Responsive Tab Group */}
+        <div className="flex-1 flex justify-center items-center min-w-0 px-0.5 sm:px-1">
+          <nav className="flex items-center bg-[#F6F1E7] p-1 rounded-xl border border-[#E7E1D3] shadow-2xs max-w-full overflow-x-auto no-scrollbar">
             <button
               onClick={() => onSelectTab('analyze')}
-              className={`flex items-center space-x-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${activeTab === 'analyze'
+              className={`flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 shrink-0 cursor-pointer ${
+                activeTab === 'analyze'
                   ? 'bg-[#1E1B17] text-[#FBF8F1] font-bold shadow-xs'
                   : 'text-[#6E6659] hover:text-[#1E1B17] hover:bg-[#E7E1D3]/50'
-                }`}
+              }`}
             >
-              <FileText className="w-3.5 h-3.5" />
-              <span>Analyze</span>
+              <FileText className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden lg:inline">{t('nav.tab_analyze')}</span>
+              <span className="lg:hidden">{t('nav.tab_analyze_short')}</span>
             </button>
 
             <button
               onClick={() => onSelectTab('compare')}
-              className={`flex items-center space-x-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${activeTab === 'compare'
+              className={`flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 shrink-0 cursor-pointer ${
+                activeTab === 'compare'
                   ? 'bg-[#1E1B17] text-[#FBF8F1] font-bold shadow-xs'
                   : 'text-[#6E6659] hover:text-[#1E1B17] hover:bg-[#E7E1D3]/50'
-                }`}
+              }`}
             >
-              <GitCompare className="w-3.5 h-3.5" />
-              <span>Compare</span>
+              <GitCompare className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden lg:inline">{t('nav.tab_compare')}</span>
+              <span className="lg:hidden">{t('nav.tab_compare_short')}</span>
             </button>
 
             <button
               onClick={() => onSelectTab('legal_aid')}
-              className={`flex items-center space-x-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${activeTab === 'legal_aid'
+              className={`flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 shrink-0 cursor-pointer ${
+                activeTab === 'legal_aid'
                   ? 'bg-[#1E1B17] text-[#FBF8F1] font-bold shadow-xs'
                   : 'text-[#6E6659] hover:text-[#1E1B17] hover:bg-[#E7E1D3]/50'
-                }`}
+              }`}
             >
-              <MapPin className="w-3.5 h-3.5" />
-              <span className="hidden min-[380px]:inline">Legal Aid</span>
-              <span className="min-[380px]:hidden">Aid</span>
+              <MapPin className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden lg:inline">{t('nav.tab_legal_aid')}</span>
+              <span className="lg:hidden">{t('nav.tab_legal_aid_short')}</span>
             </button>
           </nav>
         </div>
 
-        {/* Right Zone: Grouped Controls Cluster (Quiet Status Signal + Settings) */}
-        <div className="flex items-center space-x-2 shrink-0">
+        {/* Right Zone: Responsive Controls Cluster (Language Toggle + Status Signal + Settings) */}
+        <div className="flex items-center space-x-1 sm:space-x-2 shrink-0">
+          {/* Language Selection UI (English / हिंदी) */}
+          <div className="flex flex-col items-start justify-center bg-[#F6F1E7] px-2 sm:px-2.5 py-1 rounded-xl border border-[#E7E1D3] shrink-0 shadow-2xs">
+            <span className="text-[9px] text-[#6E6659] font-medium leading-none mb-0.5 hidden sm:flex items-center space-x-1">
+              <Globe className="w-2.5 h-2.5 text-[#B85C38]" />
+              <span>{t('nav.language')}</span>
+            </span>
+            <div className="flex items-center space-x-0.5 sm:space-x-1 leading-none font-bold text-xs">
+              <button
+                type="button"
+                onClick={() => setLanguage('en')}
+                className={`transition-all duration-200 cursor-pointer text-[11px] sm:text-xs ${
+                  language === 'en'
+                    ? 'text-[#1E1B17] font-extrabold underline underline-offset-2 decoration-[#B85C38]'
+                    : 'text-[#6E6659] hover:text-[#1E1B17] font-medium'
+                }`}
+              >
+                <span className="hidden min-[400px]:inline">English</span>
+                <span className="min-[400px]:hidden">EN</span>
+              </button>
+              <span className="text-[#94A3B8] font-normal text-[10px] sm:text-xs">/</span>
+              <button
+                type="button"
+                onClick={() => setLanguage('hi')}
+                className={`transition-all duration-200 cursor-pointer text-[11px] sm:text-xs ${
+                  language === 'hi'
+                    ? 'text-[#1E1B17] font-extrabold underline underline-offset-2 decoration-[#B85C38]'
+                    : 'text-[#6E6659] hover:text-[#1E1B17] font-medium'
+                }`}
+              >
+                <span className="hidden min-[400px]:inline">हिंदी</span>
+                <span className="min-[400px]:hidden">हि</span>
+              </button>
+            </div>
+          </div>
+
           {/* Subtle Global Trust Signal Badge */}
-          {configStatus.demoMode ? (
-            <button
-              onClick={onOpenSettings}
-              className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A] text-[11px] font-semibold hover:bg-[#FDE68A]/70 transition-colors"
-              title="Running in Demo Mode (Sample Engine Active). Click to configure API Key."
-            >
-              <AlertCircle className="w-3 h-3 text-[#92400E] shrink-0" />
-              <span className="hidden min-[480px]:inline">Demo Mode</span>
-            </button>
-          ) : (
+          {!configStatus.demoMode && (
             <div
-              className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-[#ECFDF5] text-[#065F46] border border-[#A7F3D0] text-[11px] font-semibold"
+              className="hidden md:flex items-center space-x-1.5 px-2.5 py-1.5 rounded-full bg-[#ECFDF5] text-[#065F46] border border-[#A7F3D0] text-[11px] font-semibold shrink-0"
               title="Live AI Engine Active"
             >
-              <ShieldCheck className="w-3 h-3 text-[#065F46] shrink-0" />
-              <span className="hidden min-[480px]:inline">Live AI</span>
+              <ShieldCheck className="w-3.5 h-3.5 text-[#065F46] shrink-0" />
+              <span>Live AI</span>
             </div>
           )}
 
           {/* Settings Button */}
           <button
             onClick={onOpenSettings}
-            title="Settings & API Key"
-            className="p-2 rounded-lg bg-[#F6F1E7] hover:bg-[#E7E1D3]/70 text-[#6E6659] hover:text-[#1E1B17] transition-all duration-200 border border-[#E7E1D3]"
+            className="p-1.5 sm:p-2 rounded-lg bg-[#F6F1E7] hover:bg-[#E7E1D3]/70 text-[#6E6659] hover:text-[#1E1B17] transition-all duration-200 border border-[#E7E1D3] shrink-0"
+            title="Settings"
           >
-            <Settings className="w-4 h-4" />
+            <Settings className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
           </button>
         </div>
       </div>

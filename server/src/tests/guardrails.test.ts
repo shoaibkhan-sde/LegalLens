@@ -8,7 +8,12 @@ interface TestCase {
   expectedResult: 'REJECTED' | 'ACCEPTED';
 }
 
-const FIXTURES_DIR = path.resolve(process.cwd(), 'server/src/tests/fixtures');
+const getDirName = () => {
+  if (typeof __dirname !== 'undefined') return __dirname;
+  return path.resolve(process.cwd(), 'server/src/tests');
+};
+
+const FIXTURES_DIR = path.resolve(getDirName(), 'fixtures');
 
 const testCases: TestCase[] = [
   {

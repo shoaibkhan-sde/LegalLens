@@ -37,12 +37,15 @@ const ICON_MAP: Record<string, any> = {
   Briefcase,
 };
 
+import { useLanguage } from '../context/LanguageContext';
+
 export const ClauseCard: React.FC<ClauseCardProps> = ({
   clause,
   readingLevel,
   onVerifyInDocument,
   onOpenShareModal,
 }) => {
+  const { t, language } = useLanguage();
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
 
   const explanationText =
@@ -55,10 +58,11 @@ export const ClauseCard: React.FC<ClauseCardProps> = ({
     } else {
       setIsPlayingAudio(true);
       SpeechEngine.speak(
-        `${clause.title}. ${explanationText}. Consequence: ${clause.one_line_consequence}`,
+        `${clause.title}. ${explanationText}. ${clause.one_line_consequence}`,
         () => setIsPlayingAudio(true),
         () => setIsPlayingAudio(false),
-        () => setIsPlayingAudio(false)
+        () => setIsPlayingAudio(false),
+        language
       );
     }
   };
@@ -71,14 +75,14 @@ export const ClauseCard: React.FC<ClauseCardProps> = ({
           bg: 'bg-[#FFF5F5] border-[#FCA5A5]',
           badgeBg: 'bg-[#FEE2E2] text-[#991B1B] border-[#FCA5A5]',
           icon: AlertOctagon,
-          label: 'High Risk',
+          label: language === 'hi' ? 'उच्च जोखिम' : 'High Risk',
         };
       case 'medium':
         return {
           bg: 'bg-[#FFFBEB] border-[#FDE68A]',
           badgeBg: 'bg-[#FEF3C7] text-[#92400E] border-[#FDE68A]',
           icon: Clock,
-          label: 'Watch Out',
+          label: language === 'hi' ? 'सावधान रहें' : 'Watch Out',
         };
       case 'low':
       default:
@@ -86,7 +90,7 @@ export const ClauseCard: React.FC<ClauseCardProps> = ({
           bg: 'bg-[#ECFDF5] border-[#A7F3D0]',
           badgeBg: 'bg-[#D1FAE5] text-[#065F46] border-[#6EE7B7]',
           icon: CheckCircle2,
-          label: 'Low Risk',
+          label: language === 'hi' ? 'कम जोखिम' : 'Low Risk',
         };
     }
   };
@@ -131,12 +135,12 @@ export const ClauseCard: React.FC<ClauseCardProps> = ({
           {readingLevel === 'very_simple' ? (
             <>
               <Sparkles className="w-3 h-3 text-[#B85C38]" />
-              <span>Simple Meaning</span>
+              <span>{language === 'hi' ? 'सरल अर्थ' : 'Simple Meaning'}</span>
             </>
           ) : (
             <>
               <Zap className="w-3 h-3 text-[#B85C38]" />
-              <span>Clause Meaning</span>
+              <span>{language === 'hi' ? 'खंड का अर्थ' : 'Clause Meaning'}</span>
             </>
           )}
         </div>
@@ -162,7 +166,7 @@ export const ClauseCard: React.FC<ClauseCardProps> = ({
             }`}
           >
             {isPlayingAudio ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5 text-[#B85C38]" />}
-            <span>{isPlayingAudio ? 'Stop' : 'Read'}</span>
+            <span>{isPlayingAudio ? (language === 'hi' ? 'रोकें' : 'Stop') : (language === 'hi' ? 'सुनें' : 'Read')}</span>
           </button>
 
           {/* Tap-To-Verify Button */}
@@ -171,7 +175,7 @@ export const ClauseCard: React.FC<ClauseCardProps> = ({
             className="flex items-center space-x-1.5 px-3 py-1.5 rounded bg-[#F6F1E7] hover:bg-[#E7E1D3]/50 text-[#1E1B17] text-xs font-semibold transition-colors border border-[#E7E1D3]"
           >
             <Search className="w-3.5 h-3.5 text-[#065F46]" />
-            <span>Verify</span>
+            <span>{language === 'hi' ? 'जाँचें' : 'Verify'}</span>
           </button>
         </div>
 
@@ -181,7 +185,7 @@ export const ClauseCard: React.FC<ClauseCardProps> = ({
           className="flex items-center space-x-1.5 px-3 py-1.5 rounded bg-[#F6F1E7] hover:bg-[#E7E1D3]/50 text-[#1E1B17] text-xs font-semibold transition-colors border border-[#E7E1D3]"
         >
           <Share2 className="w-3.5 h-3.5 text-[#B85C38]" />
-          <span>Share</span>
+          <span>{language === 'hi' ? 'शेयर' : 'Share'}</span>
         </button>
       </div>
     </div>

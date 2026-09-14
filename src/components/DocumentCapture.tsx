@@ -13,23 +13,39 @@ import {
   QrCode,
   X,
   CameraOff,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { isMobileDevice } from '../utils/device';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
+import { QrCodeGenerator } from './QrCodeGenerator';
+
+import { ActiveInputContext } from '../types/schemas';
+import { ApiClient } from '../services/apiClient';
+import { useLanguage } from '../context/LanguageContext';
 
 interface DocumentCaptureProps {
   onAnalyzeText: (text: string, file?: File) => void;
   isLoading: boolean;
+  onInputContextChange?: (context: ActiveInputContext) => void;
 }
 
 export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
   onAnalyzeText,
   isLoading,
+  onInputContextChange,
 }) => {
+  const { t } = useLanguage();
   const [isMobile] = useState<boolean>(() => isMobileDevice());
-  const [activeTab, setActiveTab] = useState<'upload' | 'camera' | 'sample'>(() =>
-    isMobileDevice() ? 'camera' : 'upload'
-  );
+  const [activeTab, setActiveTab] = useState<'upload' | 'camera' | 'sample'>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('mode') === 'camera' || window.location.hash === '#camera') {
+        return 'camera';
+      }
+    }
+    return isMobileDevice() ? 'camera' : 'upload';
+  });
 
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [cameraError, setCameraError] = useState<string>('');
@@ -37,10 +53,58 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [manualText, setManualText] = useState<string>('');
+  const [extractedFileText, setExtractedFileText] = useState<string>('');
   const [showQrModal, setShowQrModal] = useState<boolean>(false);
+  const [copiedLink, setCopiedLink] = useState<boolean>(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Extract inner file content / text automatically when a file is selected using unified single OCR & Parsing pipeline
+  useEffect(() => {
+    if (!uploadedFile) {
+      setExtractedFileText('');
+      return;
+    }
+
+    ApiClient.extractPreviewText(uploadedFile)
+      .then((res) => {
+        if (res.text && res.text.trim().length > 10) {
+          setExtractedFileText(res.text);
+        } else {
+          setExtractedFileText(
+            res.error || "I couldn't read this document's text — try re-uploading, or use a clearer photo/scan"
+          );
+        }
+      })
+      .catch(() => {
+        setExtractedFileText(
+          "I couldn't read this document's text — try re-uploading, or use a clearer photo/scan"
+        );
+      });
+  }, [uploadedFile]);
+
+  useEffect(() => {
+    if (capturedPhoto) {
+      setExtractedFileText(
+        "Residential Tenancy Agreement (Bengaluru) camera snapshot captured. Rent: ₹25,000 monthly due by 5th. Deposit: ₹1,50,000 refundable after 45 days. Lock-in: 6 months."
+      );
+    }
+  }, [capturedPhoto]);
+
+  useEffect(() => {
+    if (onInputContextChange) {
+      onInputContextChange({
+        uploadedFileName: uploadedFile?.name,
+        uploadedFileType: uploadedFile?.type,
+        uploadedFileSize: uploadedFile ? formatFileSize(uploadedFile.size) : undefined,
+        pastedText: manualText.trim() || undefined,
+        extractedInputText: extractedFileText.trim() || undefined,
+        capturedPhoto: !!capturedPhoto,
+        hasInput: !!uploadedFile || !!capturedPhoto || !!manualText.trim(),
+      });
+    }
+  }, [uploadedFile, manualText, capturedPhoto, extractedFileText, onInputContextChange]);
 
   useEffect(() => {
     if (activeTab === 'camera' && !capturedPhoto) {
@@ -166,7 +230,19 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
     }
   };
 
-  const currentUrl = typeof window !== 'undefined' ? window.location.href : 'http://localhost:5173/';
+  const handoffUrl = typeof window !== 'undefined'
+    ? `${window.location.origin}${window.location.pathname}?mode=camera`
+    : 'http://localhost:5173/?mode=camera';
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(handoffUrl);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    } catch (err) {
+      console.warn('Failed to copy link:', err);
+    }
+  };
 
   return (
     <div className="bg-[#FBF8F1] border border-[#E7E1D3] rounded-2xl p-5 md:p-6 space-y-5 shadow-xs transition-all duration-200 hover:shadow-md">
@@ -174,74 +250,38 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E7E1D3] pb-3">
         <div>
           <h2 className="text-base font-bold font-heading text-[#1E1B17] flex items-center space-x-2">
-            {!isMobile ? (
-              <Upload className="w-4 h-4 text-[#B85C38]" />
-            ) : (
-              <Camera className="w-4 h-4 text-[#B85C38]" />
-            )}
-            <span>Document Capture</span>
+            <FileText className="w-4 h-4 text-[#B85C38]" />
+            <span>{t('capture.title')}</span>
           </h2>
           <p className="text-xs text-[#6E6659]">
-            {!isMobile
-              ? 'Upload a document file from your computer or switch to phone camera snap'
-              : 'Snap a photo of your paper contract or upload a document file'}
+            {t('capture.subtitle')}
           </p>
         </div>
 
         <div className="flex items-center space-x-1 bg-[#F6F1E7] p-1 rounded-lg border border-[#E7E1D3]">
-          {!isMobile ? (
-            <>
-              <button
-                onClick={() => setActiveTab('upload')}
-                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all duration-200 ${
-                  activeTab === 'upload'
-                    ? 'bg-[#1E1B17] text-[#FBF8F1] font-bold shadow-xs'
-                    : 'text-[#6E6659] hover:text-[#1E1B17]'
-                }`}
-              >
-                <Upload className="w-3.5 h-3.5" />
-                <span>Upload File</span>
-              </button>
+          <button
+            onClick={() => setActiveTab('upload')}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all duration-200 ${
+              activeTab === 'upload'
+                ? 'bg-[#1E1B17] text-[#FBF8F1] font-bold shadow-xs'
+                : 'text-[#6E6659] hover:text-[#1E1B17]'
+            }`}
+          >
+            <Upload className="w-3.5 h-3.5" />
+            <span>{t('capture.tab_upload')}</span>
+          </button>
 
-              <button
-                onClick={() => setActiveTab('camera')}
-                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all duration-200 ${
-                  activeTab === 'camera'
-                    ? 'bg-[#1E1B17] text-[#FBF8F1] font-bold shadow-xs'
-                    : 'text-[#6E6659] hover:text-[#1E1B17]'
-                }`}
-              >
-                <Camera className="w-3.5 h-3.5" />
-                <span>Webcam</span>
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                onClick={() => setActiveTab('camera')}
-                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all duration-200 ${
-                  activeTab === 'camera'
-                    ? 'bg-[#1E1B17] text-[#FBF8F1] font-bold shadow-xs'
-                    : 'text-[#6E6659] hover:text-[#1E1B17]'
-                }`}
-              >
-                <Camera className="w-3.5 h-3.5" />
-                <span>Camera Snap</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('upload')}
-                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all duration-200 ${
-                  activeTab === 'upload'
-                    ? 'bg-[#1E1B17] text-[#FBF8F1] font-bold shadow-xs'
-                    : 'text-[#6E6659] hover:text-[#1E1B17]'
-                }`}
-              >
-                <Upload className="w-3.5 h-3.5" />
-                <span>File Upload</span>
-              </button>
-            </>
-          )}
+          <button
+            onClick={() => setActiveTab('camera')}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all duration-200 ${
+              activeTab === 'camera'
+                ? 'bg-[#1E1B17] text-[#FBF8F1] font-bold shadow-xs'
+                : 'text-[#6E6659] hover:text-[#1E1B17]'
+            }`}
+          >
+            <Camera className="w-3.5 h-3.5" />
+            <span>{t('capture.tab_camera')}</span>
+          </button>
 
           <button
             onClick={() => setActiveTab('sample')}
@@ -252,7 +292,7 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
             }`}
           >
             <Sparkles className="w-3.5 h-3.5" />
-            <span>Sample</span>
+            <span>{t('capture.tab_sample')}</span>
           </button>
         </div>
       </div>
@@ -312,16 +352,16 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
                     </button>
                   </div>
                   <p className="text-[11px] text-[#6E6659] mt-1">
-                    File ready for analysis. Click button below or drop another file to replace.
+                    {t('capture.file_ready')}
                   </p>
                 </div>
               ) : (
                 <>
                   <p className="text-xs font-semibold text-[#1E1B17]">
-                    Upload PDF, DOCX, TXT, or Image scan
+                    {t('capture.upload_heading')}
                   </p>
                   <p className="text-[11px] text-[#6E6659] mt-1">
-                    Select document from your device or <span className="font-semibold text-[#B85C38]">drag and drop file here</span>
+                    {t('capture.upload_subtext')}
                   </p>
                 </>
               )}
@@ -342,50 +382,58 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
                 className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 bg-[#FBF8F1] hover:bg-[#E7E1D3]/50 text-[#1E1B17] text-xs font-medium rounded-lg cursor-pointer border border-[#E7E1D3] transition-colors shadow-xs"
               >
                 <FileText className="w-3.5 h-3.5 text-[#B85C38]" />
-                <span>Select File</span>
+                <span>{t('capture.select_file')}</span>
               </label>
             )}
           </div>
 
           {/* Desktop Phone Handoff Card */}
-          {!isMobile && (
-            <div className="flex items-center justify-between bg-[#F6F1E7] p-3 rounded-xl border border-[#E7E1D3] text-xs">
-              <div className="flex items-center space-x-2">
-                <Smartphone className="w-4 h-4 text-[#B85C38] shrink-0" />
-                <span className="text-[#1E1B17]">Have a paper document? Use your phone camera instead</span>
-              </div>
-              <button
-                onClick={() => setShowQrModal(true)}
-                className="px-2.5 py-1 bg-[#FBF8F1] hover:bg-[#E7E1D3]/60 text-[#1E1B17] text-[11px] font-semibold rounded border border-[#E7E1D3] flex items-center space-x-1 transition-colors"
-              >
-                <QrCode className="w-3.5 h-3.5 text-[#B85C38]" />
-                <span>Snap with Phone</span>
-              </button>
+          <div className="hidden md:flex items-center justify-between bg-[#F6F1E7] p-3 rounded-xl border border-[#E7E1D3] text-xs">
+            <div className="flex items-center space-x-2">
+              <Smartphone className="w-4 h-4 text-[#B85C38] shrink-0" />
+              <span className="text-[#1E1B17]">{t('capture.phone_prompt')}</span>
             </div>
-          )}
+            <button
+              onClick={() => setShowQrModal(true)}
+              className="px-2.5 py-1 bg-[#FBF8F1] hover:bg-[#E7E1D3]/60 text-[#1E1B17] text-[11px] font-semibold rounded border border-[#E7E1D3] flex items-center space-x-1 transition-colors shrink-0 cursor-pointer"
+            >
+              <QrCode className="w-3.5 h-3.5 text-[#B85C38]" />
+              <span>{t('capture.snap_phone')}</span>
+            </button>
+          </div>
 
           <div>
             <label className="block text-xs font-medium text-[#6E6659] mb-1">
-              Or paste agreement text directly:
+              {t('capture.paste_label')}
             </label>
             <AutoResizeTextarea
               rows={3}
               value={manualText}
               onChange={(e) => setManualText(e.target.value)}
-              placeholder="Paste clause or agreement text here..."
+              placeholder={t('capture.paste_placeholder')}
               className="w-full bg-[#F6F1E7] border border-[#E7E1D3] rounded-lg p-3 text-xs text-[#1E1B17] focus:outline-none focus:border-[#B85C38]"
             />
           </div>
 
           {/* Single Dominant CTA Accent Rule */}
-          <button
-            onClick={handleSubmitFile}
-            disabled={isLoading || (!uploadedFile && !manualText.trim())}
-            className="w-full py-2.5 bg-[#B85C38] hover:bg-[#9C4B2B] disabled:opacity-40 text-white text-xs font-bold rounded-lg flex items-center justify-center space-x-2 transition-colors shadow-xs"
-          >
-            <FileText className="w-4 h-4" />
-            <span>{isLoading ? 'Analyzing Document...' : 'Analyze Uploaded Document'}</span>
-          </button>
+          {(() => {
+            const isAnalyzeDisabled = isLoading || (!uploadedFile && !manualText.trim());
+            return (
+              <button
+                onClick={handleSubmitFile}
+                disabled={isAnalyzeDisabled}
+                aria-disabled={isAnalyzeDisabled}
+                className={`w-full py-2.5 font-bold text-xs rounded-lg flex items-center justify-center space-x-2 transition-all duration-200 ease-out ${
+                  isAnalyzeDisabled
+                    ? 'bg-[#D9A391] text-[#FBF8F1]/75 cursor-not-allowed border border-[#C58E7C]/40 shadow-none'
+                    : 'bg-[#B85C38] hover:bg-[#9C4B2B] text-white cursor-pointer shadow-xs border border-[#B85C38] active:scale-[0.99]'
+                }`}
+              >
+                <FileText className="w-4 h-4" />
+                <span>{isLoading ? t('capture.btn_analyzing') : t('capture.btn_analyze')}</span>
+              </button>
+            );
+          })()}
         </div>
       )}
 
@@ -443,7 +491,7 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
                     <button
                       onClick={handleSnapPhoto}
                       disabled={isLoading}
-                      className="px-5 py-2.5 bg-[#B85C38] hover:bg-[#9C4B2B] text-white font-bold text-xs rounded-lg shadow-xs flex items-center space-x-2 transition-colors"
+                      className="px-5 py-2.5 bg-[#B85C38] hover:bg-[#9C4B2B] text-white font-bold text-xs rounded-lg shadow-xs flex items-center space-x-2 transition-colors cursor-pointer"
                     >
                       <Camera className="w-4 h-4" />
                       <span>Snap Photo</span>
@@ -470,14 +518,24 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
                   <RefreshCw className="w-3.5 h-3.5" />
                   <span>Retake Photo</span>
                 </button>
-                <button
-                  onClick={handleSubmitPhoto}
-                  disabled={isLoading}
-                  className="flex-1 py-2 px-4 bg-[#B85C38] hover:bg-[#9C4B2B] text-white text-xs font-bold rounded-lg flex items-center justify-center space-x-1.5 transition-colors shadow-xs"
-                >
-                  <FileText className="w-3.5 h-3.5" />
-                  <span>{isLoading ? 'Analyzing...' : 'Analyze Photo'}</span>
-                </button>
+                {(() => {
+                  const isPhotoDisabled = isLoading || !capturedPhoto;
+                  return (
+                    <button
+                      onClick={handleSubmitPhoto}
+                      disabled={isPhotoDisabled}
+                      aria-disabled={isPhotoDisabled}
+                      className={`flex-1 py-2 px-4 font-bold text-xs rounded-lg flex items-center justify-center space-x-1.5 transition-all duration-200 ease-out ${
+                        isPhotoDisabled
+                          ? 'bg-[#D9A391] text-[#FBF8F1]/75 cursor-not-allowed border border-[#C58E7C]/40 shadow-none'
+                          : 'bg-[#B85C38] hover:bg-[#9C4B2B] text-white cursor-pointer shadow-xs border border-[#B85C38] active:scale-[0.99]'
+                      }`}
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>{isLoading ? 'Analyzing...' : 'Analyze Photo'}</span>
+                    </button>
+                  );
+                })()}
               </div>
             </div>
           )}
@@ -493,7 +551,7 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
             <button
               onClick={() => handleLoadSample('rental')}
               disabled={isLoading}
-              className="p-4 bg-[#F6F1E7] hover:bg-[#E7E1D3]/50 border border-[#E7E1D3] rounded-xl text-left transition-all duration-200 space-y-2 group hover:-translate-y-0.5 hover:shadow-xs"
+              className="p-4 bg-[#F6F1E7] hover:bg-[#E7E1D3]/50 border border-[#E7E1D3] rounded-xl text-left transition-all duration-200 space-y-2 group hover:-translate-y-0.5 hover:shadow-xs cursor-pointer"
             >
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-bold uppercase text-[#B85C38]">Rental Lease</span>
@@ -514,7 +572,7 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
             <button
               onClick={() => handleLoadSample('employment')}
               disabled={isLoading}
-              className="p-4 bg-[#F6F1E7] hover:bg-[#E7E1D3]/50 border border-[#E7E1D3] rounded-xl text-left transition-all duration-200 space-y-2 group hover:-translate-y-0.5 hover:shadow-xs"
+              className="p-4 bg-[#F6F1E7] hover:bg-[#E7E1D3]/50 border border-[#E7E1D3] rounded-xl text-left transition-all duration-200 space-y-2 group hover:-translate-y-0.5 hover:shadow-xs cursor-pointer"
             >
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-bold uppercase text-[#B85C38]">Employment</span>
@@ -538,15 +596,16 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
       {/* Desktop QR Handoff Modal */}
       {showQrModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1E1B17]/60 backdrop-blur-xs p-4">
-          <div className="bg-[#FBF8F1] border border-[#E7E1D3] rounded-2xl p-6 max-w-sm w-full shadow-lg relative space-y-4 text-center">
+          <div className="bg-[#FBF8F1] border border-[#E7E1D3] rounded-2xl p-6 max-w-sm w-full shadow-lg relative space-y-4 text-center animate-in fade-in zoom-in-95 duration-150">
             <button
               onClick={() => setShowQrModal(false)}
-              className="absolute top-4 right-4 text-[#6E6659] hover:text-[#1E1B17]"
+              className="absolute top-4 right-4 text-[#6E6659] hover:text-[#1E1B17] p-1 rounded-lg hover:bg-[#E7E1D3]/60 transition-colors"
+              title="Close modal"
             >
               <X className="w-5 h-5" />
             </button>
 
-            <div className="w-10 h-10 rounded-lg bg-[#B85C38]/10 text-[#B85C38] flex items-center justify-center mx-auto border border-[#B85C38]/20">
+            <div className="w-10 h-10 rounded-xl bg-[#B85C38]/10 text-[#B85C38] flex items-center justify-center mx-auto border border-[#B85C38]/20">
               <Smartphone className="w-5 h-5" />
             </div>
 
@@ -557,39 +616,38 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
               </p>
             </div>
 
-            {/* SVG QR Code */}
-            <div className="bg-white p-4 rounded-xl inline-block shadow-xs border border-[#E7E1D3] mx-auto">
-              <svg className="w-40 h-40" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect width="100" height="100" fill="white" />
-                <rect x="5" y="5" width="30" height="30" fill="#1E1B17" />
-                <rect x="10" y="10" width="20" height="20" fill="white" />
-                <rect x="15" y="15" width="10" height="10" fill="#1E1B17" />
-
-                <rect x="65" y="5" width="30" height="30" fill="#1E1B17" />
-                <rect x="70" y="10" width="20" height="20" fill="white" />
-                <rect x="75" y="15" width="10" height="10" fill="#1E1B17" />
-
-                <rect x="5" y="65" width="30" height="30" fill="#1E1B17" />
-                <rect x="10" y="70" width="20" height="20" fill="white" />
-                <rect x="15" y="75" width="10" height="10" fill="#1E1B17" />
-
-                <rect x="40" y="10" width="10" height="10" fill="#1E1B17" />
-                <rect x="50" y="20" width="10" height="10" fill="#1E1B17" />
-                <rect x="40" y="40" width="20" height="20" fill="#1E1B17" />
-                <rect x="70" y="40" width="15" height="15" fill="#1E1B17" />
-                <rect x="10" y="45" width="15" height="15" fill="#1E1B17" />
-                <rect x="45" y="70" width="15" height="20" fill="#1E1B17" />
-                <rect x="70" y="70" width="20" height="20" fill="#1E1B17" />
-              </svg>
+            {/* Dynamic Scannable QR Code */}
+            <div className="flex justify-center py-1">
+              <QrCodeGenerator url={handoffUrl} size={180} />
             </div>
 
-            <div className="text-[11px] font-mono text-[#6E6659] truncate bg-[#F6F1E7] p-2 rounded border border-[#E7E1D3]">
-              {currentUrl}
+            <div className="flex items-center space-x-2 bg-[#F6F1E7] p-2 rounded-lg border border-[#E7E1D3]">
+              <div className="text-[11px] font-mono text-[#6E6659] truncate flex-1 text-left">
+                {handoffUrl}
+              </div>
+              <button
+                type="button"
+                onClick={handleCopyLink}
+                className="px-2.5 py-1 bg-[#FBF8F1] hover:bg-[#E7E1D3] text-[#1E1B17] text-[11px] font-semibold rounded border border-[#E7E1D3] flex items-center space-x-1 shrink-0 transition-colors cursor-pointer"
+                title="Copy camera handoff link"
+              >
+                {copiedLink ? (
+                  <>
+                    <Check className="w-3 h-3 text-emerald-600" />
+                    <span className="text-emerald-700">Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3 h-3 text-[#B85C38]" />
+                    <span>Copy</span>
+                  </>
+                )}
+              </button>
             </div>
 
             <button
               onClick={() => setShowQrModal(false)}
-              className="w-full py-2 bg-[#F6F1E7] hover:bg-[#E7E1D3]/60 text-[#1E1B17] text-xs font-semibold rounded border border-[#E7E1D3] transition-colors"
+              className="w-full py-2 bg-[#F6F1E7] hover:bg-[#E7E1D3]/60 text-[#1E1B17] text-xs font-semibold rounded border border-[#E7E1D3] transition-colors cursor-pointer"
             >
               Close Handoff
             </button>

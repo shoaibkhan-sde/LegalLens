@@ -86,5 +86,24 @@
 1. **Icon + 1-2 Words on EVERY Button**: Never icon alone, never long sentence button.
 2. **Voice Everywhere**: Voice STT (`Mic`) next to text inputs; Voice TTS (`Volume2`) on all clause explanations and chat responses.
 3. **Risk System**: Color + Icon + Consequence sentence.
-4. **Device Awareness**: Camera-first on mobile, File-first on desktop with QR phone handoff.
+4. **Device Awareness**: Camera-first on mobile, File-first on desktop with QR phone handoff (keyed off touch/camera capability, not viewport width alone).
 5. **Tap-to-Verify**: Clicking "Verify" on any simplified clause highlights its original source text in `DocumentViewer.tsx`.
+
+---
+
+## 6. Responsive Architecture & Breakpoint Tokens
+
+Full specification documented in [`RESPONSIVE.md`](file:///e:/LegalLens/RESPONSIVE.md).
+
+### Standard Breakpoint Tokens
+- **`mobile`** (`0px – 480px`): Base styles (unprefixed).
+- **`mobile-lg`** (`481px – 767px`): Phablets / large phones (`sm:`).
+- **`tablet`** (`768px – 1023px`): Tablets portrait (`md:`).
+- **`laptop`** (`1024px – 1439px`): Laptop / Tablet landscape (`lg:`).
+- **`desktop`** (`1440px+`): Desktop & Ultrawide (`xl:` / `2xl:`).
+
+### Hard Architectural Rules
+1. **Mobile-First, Additive CSS Only**: Base styles define mobile; larger breakpoints only add (`min-width`). Never write desktop-first `max-width` overrides.
+2. **Strict Scoping**: Every UI modification must be scoped to its intended breakpoint and must never mutate shared base styles.
+3. **7-Viewport Audit Matrix**: Test across 375px, 393px, 412px, 768px, 1024px, 1440px, and 1920px viewports.
+

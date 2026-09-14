@@ -10,28 +10,37 @@ import { DocumentAnalysisResult, ComparisonResult } from '../types/schemas';
 import { ApiClient } from '../services/apiClient';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
 
+import { useLanguage } from '../context/LanguageContext';
+
 interface ComparisonViewProps {
   currentDocument?: DocumentAnalysisResult | null;
 }
 
 export const ComparisonView: React.FC<ComparisonViewProps> = ({ currentDocument }) => {
+  const { t } = useLanguage();
   const [docAText, setDocAText] = useState<string>('');
   const [docBText, setDocBText] = useState<string>('');
   const [comparisonResult, setComparisonResult] = useState<ComparisonResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const hasDocA = Boolean(docAText.trim() || currentDocument);
+  const hasDocB = Boolean(docBText.trim());
+  const isCompareDisabled = !hasDocA || !hasDocB || isLoading;
 
   const handleRunComparison = async () => {
+    if (isCompareDisabled) return;
+
     setIsLoading(true);
+    setErrorMessage(null);
     try {
       const textA =
         docAText.trim() ||
         (currentDocument && currentDocument.clauses
           ? currentDocument.clauses.map((c) => c.original_text).join('\n')
-          : `RESIDENTIAL LEASE AGREEMENT A (Bengaluru)\nRent ₹25,000. Security Deposit ₹1,50,000. Notice 60 days. Lock-in 6 months.`);
+          : '');
 
-      const textB =
-        docBText.trim() ||
-        `RESIDENTIAL LEASE AGREEMENT B (Bengaluru)\nRent ₹23,000. Security Deposit ₹1,00,000. Notice 30 days. Lock-in 3 months. Force Majeure relief included.`;
+      const textB = docBText.trim();
 
       const docAObj = await ApiClient.analyzeDocument(textA);
       const docBObj = await ApiClient.analyzeDocument(textB);
@@ -39,7 +48,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ currentDocument 
       const result = await ApiClient.compareDocuments(docAObj, docBObj);
       setComparisonResult(result);
     } catch (err: any) {
-      alert(err.message || 'Comparison failed.');
+      setErrorMessage(err.message || 'System is busy, please try again in a moment.');
     } finally {
       setIsLoading(false);
     }
@@ -57,6 +66,23 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ currentDocument 
         />
       </div>
 
+      {/* Error Message Banner */}
+      {errorMessage && (
+        <div className="bg-[#FFF5F5] border border-[#FCA5A5] rounded-xl p-4 flex items-center justify-between text-xs text-[#991B1B] shadow-xs animate-fade-in-up">
+          <div className="flex items-center space-x-2">
+            <AlertTriangle className="w-4 h-4 text-[#B85C38] shrink-0" />
+            <span className="font-semibold">{errorMessage}</span>
+          </div>
+          <button
+            onClick={() => setErrorMessage(null)}
+            className="p-1 rounded hover:bg-[#FCA5A5]/30 text-[#991B1B] font-bold text-sm transition-colors cursor-pointer"
+            title="Dismiss error"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Comparison Setup Panel */}
       <div className="bg-[#FBF8F1] border border-[#E7E1D3] rounded-2xl p-5 md:p-6 shadow-xs space-y-4">
         <div className="flex items-center space-x-3 border-b border-[#E7E1D3] pb-3">
@@ -64,9 +90,9 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ currentDocument 
             <GitCompare className="w-4 h-4" />
           </div>
           <div>
-            <h2 className="text-base font-bold font-heading text-[#1E1B17]">Compare Two Agreements</h2>
+            <h2 className="text-base font-bold font-heading text-[#1E1B17]">{t('comparison.title')}</h2>
             <p className="text-xs text-[#6E6659]">
-              Clause-aligned diffing, asymmetric missing clause detection, and risk delta summary
+              {t('comparison.subtitle')}
             </p>
           </div>
         </div>
@@ -75,7 +101,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ currentDocument 
           <div>
             <label className="block text-xs font-semibold text-[#B85C38] mb-1.5 flex items-center space-x-1">
               <FileText className="w-3.5 h-3.5" />
-              <span>Document A (e.g. Current Agreement)</span>
+              <span>{t('comparison.doc_a')}</span>
             </label>
             <AutoResizeTextarea
               rows={4}
@@ -84,7 +110,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ currentDocument 
               placeholder={
                 currentDocument
                   ? `Using active document: "${currentDocument.document_title}"`
-                  : 'Paste Document A text or use active loaded document...'
+                  : t('comparison.placeholder_a')
               }
               className="w-full bg-[#F6F1E7] border border-[#E7E1D3] rounded-lg p-3 text-xs text-[#1E1B17] focus:outline-none focus:border-[#B85C38]"
             />
@@ -93,13 +119,13 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ currentDocument 
           <div>
             <label className="block text-xs font-semibold text-[#B85C38] mb-1.5 flex items-center space-x-1">
               <FileText className="w-3.5 h-3.5" />
-              <span>Document B (e.g. Counter-Offer Draft)</span>
+              <span>{t('comparison.doc_b')}</span>
             </label>
             <AutoResizeTextarea
               rows={4}
               value={docBText}
               onChange={(e) => setDocBText(e.target.value)}
-              placeholder="Paste Document B text here..."
+              placeholder={t('comparison.placeholder_b')}
               className="w-full bg-[#F6F1E7] border border-[#E7E1D3] rounded-lg p-3 text-xs text-[#1E1B17] focus:outline-none focus:border-[#B85C38]"
             />
           </div>
@@ -107,11 +133,16 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ currentDocument 
 
         <button
           onClick={handleRunComparison}
-          disabled={isLoading}
-          className="w-full py-2.5 bg-[#B85C38] hover:bg-[#9C4B2B] text-white font-bold text-xs rounded-lg flex items-center justify-center space-x-2 transition-colors disabled:opacity-40 shadow-xs"
+          disabled={isCompareDisabled}
+          aria-disabled={isCompareDisabled}
+          className={`w-full py-2.5 font-bold text-xs rounded-lg flex items-center justify-center space-x-2 transition-all duration-200 ease-out ${
+            isCompareDisabled
+              ? 'bg-[#D9A391] text-[#FBF8F1]/75 cursor-not-allowed border border-[#C58E7C]/40 shadow-none'
+              : 'bg-[#B85C38] hover:bg-[#9C4B2B] text-white cursor-pointer shadow-xs border border-[#B85C38] active:scale-[0.99]'
+          }`}
         >
           <GitCompare className="w-4 h-4" />
-          <span>{isLoading ? 'Aligning & Comparing Clauses...' : 'Compare Contracts Side-by-Side'}</span>
+          <span>{isLoading ? t('comparison.btn_comparing') : t('comparison.btn_compare')}</span>
         </button>
       </div>
 
@@ -125,9 +156,9 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ currentDocument 
             className="w-24 h-24 object-contain mx-auto"
           />
           <div>
-            <h3 className="text-xs font-bold text-[#1E1B17]">No Contracts Compared Yet</h3>
+            <h3 className="text-xs font-bold text-[#1E1B17]">{t('comparison.empty_title')}</h3>
             <p className="text-xs text-[#6E6659] mt-1 max-w-sm mx-auto">
-              Paste agreement text into Document A and Document B above, then click "Compare Contracts Side-by-Side" to view clause alignment.
+              {t('comparison.empty_sub')}
             </p>
           </div>
         </div>
