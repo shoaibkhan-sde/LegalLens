@@ -36,11 +36,16 @@ export const Navbar: React.FC<NavbarProps> = ({
           <img
             src="/assets/logo.png"
             alt="LegalLens Logo"
-            className="w-7 h-7 sm:w-10 sm:h-10 object-contain rounded-full shrink-0"
+            draggable="false"
+            onDragStart={(e) => e.preventDefault()}
+            onContextMenu={(e) => e.preventDefault()}
+            onMouseDown={(e) => e.preventDefault()}
+            onDoubleClick={(e) => e.preventDefault()}
+            className="w-7 h-7 sm:w-10 sm:h-10 object-contain rounded-full shrink-0 select-none pointer-events-none"
           />
           <div>
             <h1 className="text-[17px] sm:text-[19px] md:text-[20px] font-semibold font-brand text-[#2D261E] tracking-tight leading-none hidden sm:block">
-              {t('nav.brand_title')}<span className="text-[#B85C38] font-bold">Lens</span>
+              Legal<span className="text-[#B85C38] font-bold">Lens</span>
             </h1>
             <p className="text-[9px] text-[#6E6659] hidden md:block leading-none mt-0.5">
               {t('nav.brand_subtitle')}

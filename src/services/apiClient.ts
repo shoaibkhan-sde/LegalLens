@@ -73,14 +73,22 @@ export class ApiClient {
     return 'en';
   }
 
-  public static async analyzeDocument(text?: string, file?: File, language?: 'en' | 'hi'): Promise<DocumentAnalysisResult> {
+  public static async analyzeDocument(
+    text?: string,
+    file?: File,
+    language?: 'en' | 'hi',
+    onProgress?: (stageIndex: number, status: 'in_progress' | 'completed', elapsedMs?: number) => void
+  ): Promise<DocumentAnalysisResult> {
     const formData = new FormData();
     if (text) formData.append('text', text);
     if (file) formData.append('file', file);
     formData.append('language', language || this.getActiveLanguage());
 
-    const res = await fetch('/api/analyze', {
+    const res = await fetch('/api/analyze?stream=true', {
       method: 'POST',
+      headers: {
+        'Accept': 'text/event-stream',
+      },
       body: formData,
     });
 
@@ -89,7 +97,66 @@ export class ApiClient {
       this.handleApiError(res, err, 'Failed to analyze document');
     }
 
-    return await res.json();
+    if (!res.body) {
+      return await res.json();
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let finalResult: DocumentAnalysisResult | null = null;
+    let streamError: string | null = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const blocks = buffer.split('\n\n');
+      buffer = blocks.pop() || '';
+
+      for (const block of blocks) {
+        if (!block.trim()) continue;
+        const eventMatch = block.match(/^event:\s*(.+)$/m);
+        const dataMatch = block.match(/^data:\s*(.+)$/m);
+
+        const event = eventMatch ? eventMatch[1].trim() : 'message';
+        const rawData = dataMatch ? dataMatch[1].trim() : '';
+
+        if (!rawData) continue;
+
+        try {
+          const parsed = JSON.parse(rawData);
+          if (event === 'progress' && onProgress) {
+            const STAGE_MAP: Record<string, number> = {
+              guard1: 0,
+              ocr_parsing: 1,
+              clause_chunking: 2,
+              risk_tagging: 3,
+              ai_synthesis: 4,
+            };
+            const idx = typeof parsed.stageIndex === 'number' ? parsed.stageIndex : (STAGE_MAP[parsed.stage] ?? 0);
+            onProgress(idx, parsed.status, parsed.elapsed_ms);
+          } else if (event === 'result') {
+            finalResult = parsed;
+          } else if (event === 'error') {
+            streamError = parsed.error || 'Pipeline execution failed.';
+          }
+        } catch (e) {
+          console.warn('Error parsing SSE payload block:', e);
+        }
+      }
+    }
+
+    if (streamError) {
+      throw new Error(streamError);
+    }
+
+    if (!finalResult) {
+      throw new Error('Analysis completed without returning a valid result payload.');
+    }
+
+    return finalResult;
   }
 
   public static async compareDocuments(

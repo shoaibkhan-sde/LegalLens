@@ -496,7 +496,52 @@ async function callAiChatCompletion(messages: any[], jsonMode: boolean = false):
   return null;
 }
 
-// Guard 1: Fast Input Gate Classifier with Substantive Legal Reasoning
+// Guard 1: AI Input Gate Classifier & Substantive Legal Reasoning
+export async function runGuard1InputGateAsync(text: string): Promise<Guard1InputGate> {
+  const syncGate = runGuard1InputGate(text);
+  if (!syncGate.is_legal_document) {
+    return syncGate;
+  }
+
+  try {
+    const messages = [
+      {
+        role: 'system',
+        content: `You are Guard 1, an expert AI legal document classifier. Analyze the provided text and classify whether it is a valid legal document (e.g. employment contract, rental agreement, loan note, NDA, consumer terms, service contract).
+Respond strictly in JSON with keys:
+"is_legal_document": boolean,
+"category": string (one of: "rental/lease agreement", "employment contract", "NDA", "loan agreement/promissory note", "sale agreement/deed", "other"),
+"confidence": number (between 0.0 and 1.0),
+"rejection_reason": string or null.`
+      },
+      {
+        role: 'user',
+        content: `Document text sample:\n\n${text.slice(0, 1800)}`
+      }
+    ];
+
+    const rawResponse = await callAiChatCompletion(messages, true);
+    if (rawResponse) {
+      const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (typeof parsed.is_legal_document === 'boolean') {
+          return {
+            is_legal_document: parsed.is_legal_document,
+            category: parsed.category || syncGate.category,
+            confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.95,
+            rejection_reason: parsed.rejection_reason || undefined,
+          };
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('AI Guard 1 classification fallback to rule engine:', err);
+  }
+
+  return syncGate;
+}
+
 export function runGuard1InputGate(text: string): Guard1InputGate {
   const trimmed = text.trim();
   const lower = trimmed.toLowerCase();
@@ -857,7 +902,86 @@ function classifyClauseType(text: string): ClauseType {
   return 'other';
 }
 
-// Stage 3: Risk Tagging & Consequence Severity Grounding
+// Stage 2: Async Structural Clause Chunking & Taxonomy Typing
+export async function chunkDocumentTextIntoClausesAsync(text: string): Promise<SimplifiedClause[]> {
+  const rawClauses = chunkDocumentTextIntoClauses(text);
+  return rawClauses;
+}
+
+// Stage 3: Real AI Per-Clause Risk Reasoning & Consequence Severity Grounding
+export async function applyRiskTaggingAndGroundingAsync(
+  clauses: SimplifiedClause[],
+  category: string
+): Promise<SimplifiedClause[]> {
+  const baseClauses = applyRiskTaggingAndGrounding(clauses, category as DocumentCategory);
+  if (!baseClauses.length) return baseClauses;
+
+  try {
+    const clausePayload = baseClauses.map((c) => ({
+      id: c.id,
+      title: c.title,
+      text: c.original_text.slice(0, 400),
+    }));
+
+    const messages = [
+      {
+        role: 'system',
+        content: `You are a Senior Legal Risk Evaluator. Analyze each clause for legal risk exposure under commercial law.
+Respond strictly in JSON with an object containing key "clause_risks", which is an array of objects with:
+- "id": string (matching the input clause id)
+- "risk_level": "high" | "medium" | "low"
+- "consequence": string (one clear sentence explaining the practical financial or legal consequence)
+- "icon_name": "AlertOctagon" | "Clock" | "CheckCircle"`
+      },
+      {
+        role: 'user',
+        content: `Document Category: ${category}\nClauses to analyze:\n${JSON.stringify(clausePayload, null, 2)}`
+      }
+    ];
+
+    const rawResponse = await callAiChatCompletion(messages, true);
+    if (rawResponse) {
+      const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (Array.isArray(parsed.clause_risks)) {
+          const riskMap = new Map<string, { risk_level: 'high' | 'medium' | 'low'; consequence: string; icon_name?: string }>();
+          for (const item of parsed.clause_risks) {
+            if (item && item.id) {
+              riskMap.set(item.id, {
+                risk_level: item.risk_level === 'high' || item.risk_level === 'medium' ? item.risk_level : 'low',
+                consequence: item.consequence || '',
+                icon_name: item.icon_name || (item.risk_level === 'high' ? 'AlertOctagon' : item.risk_level === 'medium' ? 'Clock' : 'CheckCircle'),
+              });
+            }
+          }
+
+          return baseClauses.map((clause) => {
+            const aiRisk = riskMap.get(clause.id);
+            if (!aiRisk) return clause;
+
+            const finalRisk = aiRisk.risk_level;
+            const finalIcon = aiRisk.icon_name || (finalRisk === 'high' ? 'AlertOctagon' : finalRisk === 'medium' ? 'Clock' : 'CheckCircle');
+            const consText = aiRisk.consequence || clause.one_line_consequence;
+            const grounding = verifyGuard2aGrounding(clause.original_text, consText);
+
+            return {
+              ...clause,
+              risk_level: finalRisk,
+              icon_name: finalIcon,
+              one_line_consequence: grounding.groundedConsequence,
+            };
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('AI Risk Tagging reasoning fallback to rule engine:', err);
+  }
+
+  return baseClauses;
+}
+
 export function applyRiskTaggingAndGrounding(
   clauses: SimplifiedClause[],
   category: DocumentCategory
@@ -945,21 +1069,17 @@ function generateVerySimpleExplanation(text: string, clauseType: ClauseType): st
   return `This part explains rules for ${clauseType}.`;
 }
 
-// Stage 4: Document Analysis Pipeline
-export async function analyzeDocumentText(
+// Stage 4: Dedicated AI Synthesis & Briefing Packet Generation
+export async function synthesizeDocumentAnalysis(
   text: string,
+  clauses: SimplifiedClause[],
+  guard1: Guard1InputGate,
   categoryHint?: string,
   language: string = 'en'
 ): Promise<DocumentAnalysisResult> {
-  // Step 1: Guard 1 Input Gate
-  const guard1 = runGuard1InputGate(text);
-  if (!guard1.is_legal_document) {
-    throw new Error(guard1.rejection_reason || 'Document rejected by Guard 1 input gate.');
-  }
-
   const { demoMode } = getServerConfigStatus();
 
-  // If live API KEY is available, run live AI document analysis
+  // If live API KEY is available, run live AI document synthesis
   if (!demoMode) {
     const isHindi = language === 'hi';
     const langInstruction = isHindi
@@ -970,14 +1090,14 @@ export async function analyzeDocumentText(
       {
         role: 'system',
         content: `You are LegalLens AI, an accessible legal document analyzer. 
-Analyze the provided document text and produce a strict JSON response conforming to schemas.ts.
+Analyze the provided document text and extracted clauses and produce a strict JSON response conforming to schemas.ts.
 Taxonomy Document Categories: ${JSON.stringify(DOCUMENT_CATEGORY_ENUM)}
 Taxonomy Clause Types: ${JSON.stringify(CLAUSE_TYPE_ENUM)}
 Rule: Every simplified clause must have a simple_explanation and a very_simple_explanation, risk_level ('low'|'medium'|'high'), plain consequence string, and disclaimer field on root, checklist, and lawyer_briefing.${langInstruction}`,
       },
       {
         role: 'user',
-        content: `Analyze this document text and respond strictly in valid JSON format:\n\n${text.slice(0, 15000)}`,
+        content: `Synthesize final analysis and response for this document:\nCategory: ${guard1.category}\nExtracted Clauses: ${JSON.stringify(clauses.slice(0, 15))}\n\nRaw Text:\n${text.slice(0, 12000)}`,
       },
     ];
 
@@ -997,8 +1117,6 @@ Rule: Every simplified clause must have a simple_explanation and a very_simple_e
           parsed.clauses.length > 0 &&
           Array.isArray(parsed.checklist) &&
           parsed.lawyer_briefing &&
-          Array.isArray(parsed.lawyer_briefing.flagged_issues) &&
-          Array.isArray(parsed.lawyer_briefing.questions_to_ask_lawyer) &&
           parsed.disclaimer
         ) {
           return {
@@ -1007,22 +1125,17 @@ Rule: Every simplified clause must have a simple_explanation and a very_simple_e
           };
         }
       } catch (e) {
-        console.warn('Failed to parse AI JSON result, using hardened heuristic pipeline:', e);
+        console.warn('Failed to parse AI JSON result, using hardened heuristic synthesis:', e);
       }
     }
   }
 
-  // Hardened Analysis Pipeline (Stage 2 Chunking, Stage 3 Risk Tagging, Stage 4 Synthesis)
-  const rawClauses = chunkDocumentTextIntoClauses(text);
-  const clauses = applyRiskTaggingAndGrounding(rawClauses, guard1.category);
-
+  // Hardened Heuristic Synthesis
   const highRiskCount = clauses.filter((c) => c.risk_level === 'high').length;
   const mediumRiskCount = clauses.filter((c) => c.risk_level === 'medium').length;
   const overallRiskScore = Math.min(95, 30 + highRiskCount * 20 + mediumRiskCount * 10);
-
   const docTitle = extractDocumentTitle(text, guard1.category);
 
-  // Stage 4 Synthesis: Checklist, Lawyer Briefing, Options
   const checklistItems = clauses
     .filter((c) => c.risk_level !== 'low' || c.clause_type.includes('payment') || c.clause_type.includes('deposit') || c.clause_type.includes('notice'))
     .map((c, idx) => ({
@@ -1089,12 +1202,28 @@ Rule: Every simplified clause must have a simple_explanation and a very_simple_e
       document_summary: `${docTitle} containing ${clauses.length} clauses with ${highRiskCount} high-risk flags.`,
       flagged_issues: flaggedIssues,
       questions_to_ask_lawyer: questionsForLawyer,
-      missing_protective_clauses: ['Verify presence of force majeure and clear termination remedy clauses.'],
-      recommended_next_steps: ['Consult a legal advocate with this briefing packet before signing.'],
-      disclaimer: 'Informational briefing packet for legal consultation.',
+      missing_protective_clauses: ['Standard dispute resolution clause', 'Clear notice period parameter'],
+      recommended_next_steps: ['Review high-risk clauses with advocate', 'Request written clarification from other party'],
+      disclaimer: 'Advocate consultation packet prepared by LegalLens AI.',
     },
-    disclaimer: 'LegalLens provides AI-assisted analysis for informational purposes only. It does not constitute legal advice.',
+    disclaimer: 'LegalLens AI analysis provided for informational purposes only under Advocate Act 1961.',
   };
+}
+
+export async function analyzeDocumentText(
+  text: string,
+  categoryHint?: string,
+  language: string = 'en'
+): Promise<DocumentAnalysisResult> {
+  const guard1 = runGuard1InputGate(text);
+  if (!guard1.is_legal_document) {
+    throw new Error(guard1.rejection_reason || 'Document rejected by Guard 1 input gate.');
+  }
+
+  const rawClauses = chunkDocumentTextIntoClauses(text);
+  const clauses = applyRiskTaggingAndGrounding(rawClauses, guard1.category);
+
+  return await synthesizeDocumentAnalysis(text, clauses, guard1, categoryHint, language);
 }
 
 // Stage 4: Compare 2 Documents with Asymmetry Surface & Schema Compliance

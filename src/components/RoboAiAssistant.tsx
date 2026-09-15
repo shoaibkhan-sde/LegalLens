@@ -385,12 +385,17 @@ export const RoboAiAssistant: React.FC<RoboAiAssistantProps> = ({
             <img
               src="/assets/robo-avatar.png"
               alt="LegalLens AI Avatar"
-              className="w-full h-full object-contain drop-shadow-md group-hover:drop-shadow-[0_0_15px_rgba(56,189,248,0.8)]"
+              draggable="false"
+              onDragStart={(e) => e.preventDefault()}
+              onContextMenu={(e) => e.preventDefault()}
+              onMouseDown={(e) => e.preventDefault()}
+              onDoubleClick={(e) => e.preventDefault()}
+              className="w-full h-full object-contain drop-shadow-md group-hover:drop-shadow-[0_0_15px_rgba(56,189,248,0.8)] select-none pointer-events-none"
             />
             <div className="absolute top-[40%] left-[26%] w-[48%] h-[20%] bg-[#0B132B] rounded-md animate-robo-blink pointer-events-none opacity-90" />
             <span className="absolute top-0.5 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-[#38BDF8] animate-robo-glow shadow-[0_0_10px_#38BDF8]" />
           </div>
-          <span className="text-xs font-bold font-heading text-[#B85C38] tracking-wider uppercase pr-1">ASK ME</span>
+          <span className="text-xs font-bold font-heading text-[#B85C38] tracking-wider uppercase pr-1">{t('robo.askMe')}</span>
         </button>
       </div>
     );
@@ -406,7 +411,12 @@ export const RoboAiAssistant: React.FC<RoboAiAssistantProps> = ({
             <img
               src="/assets/robo-avatar.png"
               alt="LegalLens AI Avatar"
-              className="w-full h-full object-contain"
+              draggable="false"
+              onDragStart={(e) => e.preventDefault()}
+              onContextMenu={(e) => e.preventDefault()}
+              onMouseDown={(e) => e.preventDefault()}
+              onDoubleClick={(e) => e.preventDefault()}
+              className="w-full h-full object-contain select-none pointer-events-none"
             />
           </div>
 

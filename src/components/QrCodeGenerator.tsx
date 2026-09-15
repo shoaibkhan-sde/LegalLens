@@ -71,7 +71,12 @@ export const QrCodeGenerator: React.FC<QrCodeGeneratorProps> = ({
       src={qrDataUrl}
       alt="QR code to open LegalLens camera mode on mobile"
       style={{ width: size, height: size }}
-      className={`rounded-xl shadow-xs border border-[#E7E1D3] object-contain ${className}`}
+      draggable="false"
+      onDragStart={(e) => e.preventDefault()}
+      onContextMenu={(e) => e.preventDefault()}
+      onMouseDown={(e) => e.preventDefault()}
+      onDoubleClick={(e) => e.preventDefault()}
+      className={`rounded-xl shadow-xs border border-[#E7E1D3] object-contain select-none pointer-events-none ${className}`}
     />
   );
 };

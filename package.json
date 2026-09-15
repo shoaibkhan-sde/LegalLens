@@ -7,13 +7,13 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "vite",
     "dev:server": "tsx watch server/src/index.ts",
-    "build": "tsc && vite build && tsc -p server/tsconfig.json",
+    "build": "tsc && vite build && npm run build:server",
     "build:client": "tsc && vite build",
-    "build:server": "tsc -p server/tsconfig.json",
+    "build:server": "tsc -p server/tsconfig.json && node -e \"require('fs').writeFileSync('dist-server/package.json', JSON.stringify({type:'commonjs'}))\"",
     "test:guardrails": "npx tsx server/src/tests/guardrails.test.ts",
     "test:pipeline": "npx tsx server/src/tests/pipeline.test.ts",
     "test": "npx tsx server/src/tests/guardrails.test.ts && npx tsx server/src/tests/pipeline.test.ts",
-    "start": "node dist-server/index.js",
+    "start": "node dist-server/server/src/index.js",
     "preview": "vite preview"
   },
   "dependencies": {

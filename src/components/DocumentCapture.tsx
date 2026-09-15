@@ -330,7 +330,7 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
             <div>
               {isDragging ? (
                 <p className="text-sm font-bold text-[#B85C38] animate-pulse">
-                  Drop document file here to upload
+                  {t('capture.drop_prompt')}
                 </p>
               ) : uploadedFile ? (
                 <div className="space-y-1">
@@ -346,7 +346,7 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
                       type="button"
                       onClick={handleClearFile}
                       className="p-0.5 hover:bg-[#E7E1D3] rounded text-[#6E6659] hover:text-[#1E1B17] transition-colors shrink-0"
-                      title="Remove file"
+                      title={t('capture.remove_file')}
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -449,24 +449,29 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
                     src="/assets/empty-state-illustration.png"
                     alt="Illustration of a magnifying glass examining a document"
                     loading="lazy"
-                    className="w-24 h-24 object-contain mx-auto"
+                    draggable="false"
+                    onDragStart={(e) => e.preventDefault()}
+                    onContextMenu={(e) => e.preventDefault()}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onDoubleClick={(e) => e.preventDefault()}
+                    className="w-24 h-24 object-contain mx-auto select-none pointer-events-none"
                   />
                   <div>
-                    <h4 className="text-xs font-bold text-[#1E1B17]">Camera Access Unavailable</h4>
-                    <p className="text-xs text-[#6E6659] mt-1">{cameraError}</p>
+                    <h4 className="text-xs font-bold text-[#1E1B17]">{t('capture.camera_unavailable_title')}</h4>
+                    <p className="text-xs text-[#6E6659] mt-1">{t('capture.camera_unavailable_sub')}</p>
                   </div>
                   <div className="flex items-center justify-center space-x-2 pt-1">
                     <button
                       onClick={() => setActiveTab('upload')}
-                      className="px-3.5 py-1.5 bg-[#FBF8F1] hover:bg-[#E7E1D3]/60 text-[#1E1B17] text-xs font-semibold rounded-lg border border-[#E7E1D3] transition-colors"
+                      className="px-3.5 py-1.5 bg-[#FBF8F1] hover:bg-[#E7E1D3]/60 text-[#1E1B17] text-xs font-semibold rounded-lg border border-[#E7E1D3] transition-colors cursor-pointer"
                     >
-                      Upload File Instead
+                      {t('capture.upload_file_instead')}
                     </button>
                     <button
                       onClick={() => setActiveTab('sample')}
-                      className="px-3.5 py-1.5 bg-[#B85C38] text-white text-xs font-bold rounded-lg hover:bg-[#9C4B2B] transition-colors"
+                      className="px-3.5 py-1.5 bg-[#B85C38] text-white text-xs font-bold rounded-lg hover:bg-[#9C4B2B] transition-colors cursor-pointer"
                     >
-                      Try Sample Agreement
+                      {t('capture.try_sample_agreement')}
                     </button>
                   </div>
                 </div>
@@ -483,7 +488,7 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
                   {/* Framing Overlay */}
                   <div className="absolute inset-5 border border-dashed border-[#B85C38]/60 rounded-lg pointer-events-none flex items-center justify-center">
                     <span className="bg-[#FBF8F1]/90 px-3 py-1 rounded text-[11px] font-medium text-[#1E1B17] border border-[#E7E1D3]">
-                      Align document inside box
+                      {t('capture.align_box')}
                     </span>
                   </div>
 
@@ -494,7 +499,7 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
                       className="px-5 py-2.5 bg-[#B85C38] hover:bg-[#9C4B2B] text-white font-bold text-xs rounded-lg shadow-xs flex items-center space-x-2 transition-colors cursor-pointer"
                     >
                       <Camera className="w-4 h-4" />
-                      <span>Snap Photo</span>
+                      <span>{t('capture.snap_photo')}</span>
                     </button>
                   </div>
                 </>
@@ -503,20 +508,29 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
           ) : (
             <div className="space-y-3">
               <div className="relative rounded-xl overflow-hidden border border-[#6EE7B7] bg-[#F6F1E7] max-h-[300px] flex items-center justify-center">
-                <img src={capturedPhoto} alt="Captured Contract" className="max-h-[300px] object-contain" />
+                <img
+                  src={capturedPhoto}
+                  alt="Captured Contract"
+                  draggable="false"
+                  onDragStart={(e) => e.preventDefault()}
+                  onContextMenu={(e) => e.preventDefault()}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onDoubleClick={(e) => e.preventDefault()}
+                  className="max-h-[300px] object-contain select-none pointer-events-none"
+                />
                 <div className="absolute top-3 left-3 bg-[#D1FAE5] text-[#065F46] border border-[#6EE7B7] px-2.5 py-1 rounded text-xs font-semibold flex items-center space-x-1">
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Photo Captured</span>
+                  <span>{t('capture.photo_captured')}</span>
                 </div>
               </div>
 
               <div className="flex items-center space-x-3">
                 <button
                   onClick={handleRetakePhoto}
-                  className="flex-1 py-2 px-4 bg-[#FBF8F1] hover:bg-[#E7E1D3]/60 text-[#1E1B17] text-xs font-medium rounded-lg flex items-center justify-center space-x-1.5 border border-[#E7E1D3] transition-colors"
+                  className="flex-1 py-2 px-4 bg-[#FBF8F1] hover:bg-[#E7E1D3]/60 text-[#1E1B17] text-xs font-medium rounded-lg flex items-center justify-center space-x-1.5 border border-[#E7E1D3] transition-colors cursor-pointer"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Retake Photo</span>
+                  <span>{t('capture.retake_photo')}</span>
                 </button>
                 {(() => {
                   const isPhotoDisabled = isLoading || !capturedPhoto;
@@ -532,7 +546,7 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
                       }`}
                     >
                       <FileText className="w-3.5 h-3.5" />
-                      <span>{isLoading ? 'Analyzing...' : 'Analyze Photo'}</span>
+                      <span>{isLoading ? t('capture.analyzing_photo') : t('capture.analyze_photo')}</span>
                     </button>
                   );
                 })()}
@@ -545,7 +559,7 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
       {/* Tab 3: Sample Loader */}
       {activeTab === 'sample' && (
         <div className="space-y-3">
-          <p className="text-xs text-[#6E6659]">Select a pre-analyzed agreement for instant demonstration:</p>
+          <p className="text-xs text-[#6E6659]">{t('capture.sample_prompt')}</p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <button
@@ -554,18 +568,18 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
               className="p-4 bg-[#F6F1E7] hover:bg-[#E7E1D3]/50 border border-[#E7E1D3] rounded-xl text-left transition-all duration-200 space-y-2 group hover:-translate-y-0.5 hover:shadow-xs cursor-pointer"
             >
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase text-[#B85C38]">Rental Lease</span>
-                <span className="text-[10px] bg-[#FBF8F1] text-[#6E6659] px-2 py-0.5 rounded border border-[#E7E1D3]">Bengaluru</span>
+                <span className="text-[10px] font-bold uppercase text-[#B85C38]">{t('capture.sample_rental_badge')}</span>
+                <span className="text-[10px] bg-[#FBF8F1] text-[#6E6659] px-2 py-0.5 rounded border border-[#E7E1D3]">{t('capture.city_bengaluru')}</span>
               </div>
               <h3 className="text-xs font-bold text-[#1E1B17] group-hover:text-[#B85C38] flex items-center space-x-1.5 transition-colors">
                 <Building className="w-3.5 h-3.5 text-[#B85C38]" />
-                <span>Residential Tenancy Agreement</span>
+                <span>{t('capture.sample_rental_title')}</span>
               </h3>
               <p className="text-xs text-[#6E6659] line-clamp-2">
-                11-month lease with ₹1.5L deposit, 60-day notice, and 1-month painting deduction.
+                {t('capture.sample_rental_desc')}
               </p>
               <div className="pt-1 flex items-center text-xs font-semibold text-[#B85C38] space-x-1">
-                <span>Run Analysis</span>
+                <span>{t('capture.run_analysis')}</span>
               </div>
             </button>
 
@@ -575,18 +589,18 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
               className="p-4 bg-[#F6F1E7] hover:bg-[#E7E1D3]/50 border border-[#E7E1D3] rounded-xl text-left transition-all duration-200 space-y-2 group hover:-translate-y-0.5 hover:shadow-xs cursor-pointer"
             >
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase text-[#B85C38]">Employment</span>
-                <span className="text-[10px] bg-[#FBF8F1] text-[#6E6659] px-2 py-0.5 rounded border border-[#E7E1D3]">Gurugram</span>
+                <span className="text-[10px] font-bold uppercase text-[#B85C38]">{t('capture.sample_emp_badge')}</span>
+                <span className="text-[10px] bg-[#FBF8F1] text-[#6E6659] px-2 py-0.5 rounded border border-[#E7E1D3]">{t('capture.city_gurugram')}</span>
               </div>
               <h3 className="text-xs font-bold text-[#1E1B17] group-hover:text-[#B85C38] flex items-center space-x-1.5 transition-colors">
                 <Briefcase className="w-3.5 h-3.5 text-[#B85C38]" />
-                <span>Tech Offer & Service Agreement</span>
+                <span>{t('capture.sample_emp_title')}</span>
               </h3>
               <p className="text-xs text-[#6E6659] line-clamp-2">
-                Software Engineer contract with ₹3L bond, 2-year non-compete, and 90-day notice.
+                {t('capture.sample_emp_desc')}
               </p>
               <div className="pt-1 flex items-center text-xs font-semibold text-[#B85C38] space-x-1">
-                <span>Run Analysis</span>
+                <span>{t('capture.run_analysis')}</span>
               </div>
             </button>
           </div>
@@ -610,9 +624,9 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
             </div>
 
             <div>
-              <h3 className="text-base font-bold font-heading text-[#1E1B17]">Scan Paper Document with Phone</h3>
+              <h3 className="text-base font-bold font-heading text-[#1E1B17]">{t('capture.qr_title')}</h3>
               <p className="text-xs text-[#6E6659] mt-1">
-                Scan this QR code using your mobile phone camera to open LegalLens camera mode.
+                {t('capture.qr_sub')}
               </p>
             </div>
 
@@ -634,12 +648,12 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
                 {copiedLink ? (
                   <>
                     <Check className="w-3 h-3 text-emerald-600" />
-                    <span className="text-emerald-700">Copied!</span>
+                    <span className="text-emerald-700">{t('capture.copied')}</span>
                   </>
                 ) : (
                   <>
                     <Copy className="w-3 h-3 text-[#B85C38]" />
-                    <span>Copy</span>
+                    <span>{t('capture.copy')}</span>
                   </>
                 )}
               </button>
@@ -649,7 +663,7 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
               onClick={() => setShowQrModal(false)}
               className="w-full py-2 bg-[#F6F1E7] hover:bg-[#E7E1D3]/60 text-[#1E1B17] text-xs font-semibold rounded border border-[#E7E1D3] transition-colors cursor-pointer"
             >
-              Close Handoff
+              {t('capture.close_handoff')}
             </button>
           </div>
         </div>

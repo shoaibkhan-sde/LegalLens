@@ -44,6 +44,16 @@ function AppContent() {
     return false;
   });
 
+  const [pipelineProgress, setPipelineProgress] = useState<{
+    activeStep: number;
+    stepStatuses: Array<'pending' | 'in_progress' | 'completed'>;
+    elapsedMs: Record<number, number>;
+  }>({
+    activeStep: 0,
+    stepStatuses: ['in_progress', 'pending', 'pending', 'pending', 'pending'],
+    elapsedMs: {},
+  });
+
   const handleToggleChatOpen = (open: boolean) => {
     setIsChatOpen(open);
     try {
@@ -59,8 +69,33 @@ function AppContent() {
     setIsLoading(true);
     setDocumentAnalysis(null);
     setErrorMessage(null);
+    setPipelineProgress({
+      activeStep: 0,
+      stepStatuses: ['in_progress', 'pending', 'pending', 'pending', 'pending'],
+      elapsedMs: {},
+    });
+
     try {
-      const result = await ApiClient.analyzeDocument(text, file);
+      const result = await ApiClient.analyzeDocument(text, file, undefined, (stageIndex, status, elapsedMs) => {
+        setPipelineProgress((prev) => {
+          const nextStatuses = [...prev.stepStatuses];
+          if (stageIndex >= 0 && stageIndex < 5) {
+            nextStatuses[stageIndex] = status;
+          }
+          const nextActive = status === 'in_progress'
+            ? stageIndex
+            : (status === 'completed' && stageIndex < 4 ? stageIndex + 1 : prev.activeStep);
+          const nextElapsed = { ...prev.elapsedMs };
+          if (elapsedMs !== undefined && stageIndex >= 0) {
+            nextElapsed[stageIndex] = elapsedMs;
+          }
+          return {
+            activeStep: nextActive,
+            stepStatuses: nextStatuses,
+            elapsedMs: nextElapsed,
+          };
+        });
+      });
       setDocumentAnalysis(result);
     } catch (err: any) {
       setErrorMessage(err.message || 'System is busy, please try again in a moment.');
@@ -152,7 +187,13 @@ function AppContent() {
             </div>
 
             {/* Visual Loading Progress Bar */}
-            {isLoading && <VisualProgress />}
+            {isLoading && (
+              <VisualProgress
+                activeStepIndex={pipelineProgress.activeStep}
+                stepStatuses={pipelineProgress.stepStatuses}
+                elapsedMs={pipelineProgress.elapsedMs}
+              />
+            )}
 
             {/* Document Analysis Dashboard Workspace */}
             {documentAnalysis && !isLoading && (
@@ -290,7 +331,12 @@ function AppContent() {
                     src="/assets/family-illustration.png"
                     alt="Illustration of a multi-generational family using LegalLens together"
                     loading="lazy"
-                    className="w-full h-auto max-h-[360px] sm:max-h-[420px] md:max-h-[480px] max-w-4xl object-contain mx-auto transition-transform duration-500 ease-out hover:scale-[1.02]"
+                    draggable="false"
+                    onDragStart={(e) => e.preventDefault()}
+                    onContextMenu={(e) => e.preventDefault()}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onDoubleClick={(e) => e.preventDefault()}
+                    className="w-full h-auto max-h-[360px] sm:max-h-[420px] md:max-h-[480px] max-w-4xl object-contain mx-auto transition-transform duration-500 ease-out hover:scale-[1.02] select-none pointer-events-none"
                   />
                 </div>
               </div>

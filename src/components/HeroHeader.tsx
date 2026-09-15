@@ -46,7 +46,12 @@ export const HeroHeader: React.FC = () => {
             src="/assets/hero-illustration.png"
             alt="Illustration of a person reviewing a legal document"
             loading="eager"
-            className="w-full h-auto max-w-xs sm:max-w-md lg:max-w-lg object-contain hidden min-[380px]:block mx-auto"
+            draggable="false"
+            onDragStart={(e) => e.preventDefault()}
+            onContextMenu={(e) => e.preventDefault()}
+            onMouseDown={(e) => e.preventDefault()}
+            onDoubleClick={(e) => e.preventDefault()}
+            className="w-full h-auto max-w-xs sm:max-w-md lg:max-w-lg object-contain hidden min-[380px]:block mx-auto select-none pointer-events-none"
           />
         </div>
       </div>

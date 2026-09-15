@@ -12,12 +12,14 @@ import {
   Clock,
 } from 'lucide-react';
 import { DocumentAnalysisResult } from '../types/schemas';
+import { useLanguage } from '../context/LanguageContext';
 
 interface ActionableOutputsProps {
   document: DocumentAnalysisResult;
 }
 
 export const ActionableOutputs: React.FC<ActionableOutputsProps> = ({ document }) => {
+  const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<'checklist' | 'options' | 'lawyer_brief'>('checklist');
 
   const handleExportCalendarICS = () => {
@@ -54,45 +56,45 @@ export const ActionableOutputs: React.FC<ActionableOutputsProps> = ({ document }
       {/* Header & Tabs */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E7E1D3] pb-3">
         <div>
-          <h2 className="text-base font-bold font-heading text-[#1E1B17]">Actionable Outputs & Next Steps</h2>
-          <p className="text-xs text-[#6E6659]">Structured checklist, options to consider, and advocate briefing packet</p>
+          <h2 className="text-base font-bold font-heading text-[#1E1B17]">{t('outputs.title')}</h2>
+          <p className="text-xs text-[#6E6659]">{t('outputs.subtitle')}</p>
         </div>
 
         <div className="flex items-center space-x-1 bg-[#F6F1E7] p-1 rounded-lg border border-[#E7E1D3]">
           <button
             onClick={() => setActiveTab('checklist')}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all duration-200 ${
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all duration-200 cursor-pointer ${
               activeTab === 'checklist'
                 ? 'bg-[#1E1B17] text-[#FBF8F1] font-bold shadow-xs'
                 : 'text-[#6E6659] hover:text-[#1E1B17]'
             }`}
           >
             <CheckSquare className="w-3.5 h-3.5" />
-            <span>Checklist</span>
+            <span>{t('outputs.tab_checklist')}</span>
           </button>
 
           <button
             onClick={() => setActiveTab('options')}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all duration-200 ${
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all duration-200 cursor-pointer ${
               activeTab === 'options'
                 ? 'bg-[#1E1B17] text-[#FBF8F1] font-bold shadow-xs'
                 : 'text-[#6E6659] hover:text-[#1E1B17]'
             }`}
           >
             <Sparkles className="w-3.5 h-3.5" />
-            <span>Possibilities</span>
+            <span>{t('outputs.tab_possibilities')}</span>
           </button>
 
           <button
             onClick={() => setActiveTab('lawyer_brief')}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all duration-200 ${
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all duration-200 cursor-pointer ${
               activeTab === 'lawyer_brief'
                 ? 'bg-[#1E1B17] text-[#FBF8F1] font-bold shadow-xs'
                 : 'text-[#6E6659] hover:text-[#1E1B17]'
             }`}
           >
             <Briefcase className="w-3.5 h-3.5" />
-            <span>Lawyer Briefing</span>
+            <span>{t('outputs.tab_brief')}</span>
           </button>
         </div>
       </div>
@@ -102,7 +104,7 @@ export const ActionableOutputs: React.FC<ActionableOutputsProps> = ({ document }
         <div className="space-y-4">
           <div className="flex items-center justify-between bg-[#F6F1E7] p-3.5 rounded-xl border border-[#E7E1D3]">
             <div>
-              <h3 className="text-xs font-bold text-[#1E1B17]">{document?.checklist?.title || 'Action Checklist'}</h3>
+              <h3 className="text-xs font-bold text-[#1E1B17]">{document?.checklist?.title || t('outputs.tab_checklist')}</h3>
               <p className="text-[11px] text-[#6E6659] mt-0.5">
                 {document?.checklist?.stamp_duty_required
                   ? `Stamp Duty Note: ${document?.checklist?.stamp_duty_note || 'Stamp paper required'}`
@@ -112,10 +114,10 @@ export const ActionableOutputs: React.FC<ActionableOutputsProps> = ({ document }
 
             <button
               onClick={handleExportCalendarICS}
-              className="flex items-center space-x-1.5 px-3 py-1.5 bg-[#B85C38] hover:bg-[#9C4B2B] text-white text-xs font-bold rounded transition-colors shadow-xs"
+              className="flex items-center space-x-1.5 px-3 py-1.5 bg-[#B85C38] hover:bg-[#9C4B2B] text-white text-xs font-bold rounded transition-colors shadow-xs cursor-pointer"
             >
               <Calendar className="w-3.5 h-3.5" />
-              <span>Export iCal</span>
+              <span>{t('outputs.export_ical')}</span>
             </button>
           </div>
 
@@ -140,7 +142,7 @@ export const ActionableOutputs: React.FC<ActionableOutputsProps> = ({ document }
                   </div>
                   <p className="text-xs text-[#6E6659]">{item.description}</p>
                   <p className="text-xs font-semibold text-[#065F46] pt-0.5">
-                    Action: {item.action_required}
+                    {t('outputs.action_label')}: {item.action_required}
                   </p>
                 </div>
               </div>
@@ -153,7 +155,7 @@ export const ActionableOutputs: React.FC<ActionableOutputsProps> = ({ document }
       {activeTab === 'options' && (
         <div className="space-y-4">
           <div className="p-3 bg-[#F6F1E7] border border-[#E7E1D3] rounded-xl text-xs text-[#1E1B17]">
-            <strong className="text-[#B85C38]">Framing Note:</strong> LegalLens surfaces options as potential choices you could consider, never mandatory legal directives or instructions.
+            <strong className="text-[#B85C38]">{t('outputs.framing_note_title')}</strong> {t('outputs.framing_note_desc')}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -169,8 +171,8 @@ export const ActionableOutputs: React.FC<ActionableOutputsProps> = ({ document }
                 <p className="text-xs text-[#6E6659] leading-relaxed">{opt.description}</p>
 
                 <div className="pt-2 border-t border-[#E7E1D3] text-xs space-y-0.5">
-                  <p className="text-[#065F46] font-semibold">Benefit: {opt.benefit}</p>
-                  {opt.tradeoff && <p className="text-[#6E6659]">Trade-off: {opt.tradeoff}</p>}
+                  <p className="text-[#065F46] font-semibold">{t('outputs.benefit')}: {opt.benefit}</p>
+                  {opt.tradeoff && <p className="text-[#6E6659]">{t('outputs.tradeoff')}: {opt.tradeoff}</p>}
                 </div>
               </div>
             ))}

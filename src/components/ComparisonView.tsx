@@ -62,7 +62,12 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ currentDocument 
           src="/assets/compare-illustration.png"
           alt="Illustration of two documents being compared, connected by a scale motif"
           loading="lazy"
-          className="w-full h-auto max-h-[140px] sm:max-h-[160px] md:max-h-[180px] object-contain hidden min-[380px]:block mx-auto"
+          draggable="false"
+          onDragStart={(e) => e.preventDefault()}
+          onContextMenu={(e) => e.preventDefault()}
+          onMouseDown={(e) => e.preventDefault()}
+          onDoubleClick={(e) => e.preventDefault()}
+          className="w-full h-auto max-h-[140px] sm:max-h-[160px] md:max-h-[180px] object-contain hidden min-[380px]:block mx-auto select-none pointer-events-none"
         />
       </div>
 
@@ -153,7 +158,12 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ currentDocument 
             src="/assets/empty-state-illustration.png"
             alt="Illustration of a magnifying glass examining a document"
             loading="lazy"
-            className="w-24 h-24 object-contain mx-auto"
+            draggable="false"
+            onDragStart={(e) => e.preventDefault()}
+            onContextMenu={(e) => e.preventDefault()}
+            onMouseDown={(e) => e.preventDefault()}
+            onDoubleClick={(e) => e.preventDefault()}
+            className="w-24 h-24 object-contain mx-auto select-none pointer-events-none"
           />
           <div>
             <h3 className="text-xs font-bold text-[#1E1B17]">{t('comparison.empty_title')}</h3>

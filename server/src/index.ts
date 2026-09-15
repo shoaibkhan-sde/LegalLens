@@ -8,9 +8,16 @@ import {
   setServerApiKey,
   getServerConfigStatus,
   analyzeDocumentText,
+  synthesizeDocumentAnalysis,
   compareTwoDocuments,
   answerDocumentQuestion,
   extractAndCleanDocumentText,
+  runGuard1InputGate,
+  runGuard1InputGateAsync,
+  chunkDocumentTextIntoClauses,
+  chunkDocumentTextIntoClausesAsync,
+  applyRiskTaggingAndGrounding,
+  applyRiskTaggingAndGroundingAsync,
 } from './services/astraBackend';
 
 dotenv.config();
@@ -85,25 +92,125 @@ app.post('/api/extract-preview', upload.single('file'), (req: Request, res: Resp
   }
 });
 
-// Document Analysis Endpoint
+// Document Analysis Endpoint with Real-Time SSE Progress Streaming
 app.post('/api/analyze', upload.single('file'), async (req: Request, res: Response) => {
-  try {
-    let documentText = req.body.text || '';
+  const wantsStream = req.headers.accept?.includes('text/event-stream') || req.query.stream === 'true';
 
-    // If file was uploaded
-    if (req.file) {
-      const fileBuffer = req.file.buffer;
-      const mimeType = req.file.mimetype || '';
-      const originalName = req.file.originalname || '';
-
-      documentText = extractAndCleanDocumentText(fileBuffer, mimeType, originalName);
+  if (wantsStream) {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    if (typeof (res as any).flushHeaders === 'function') {
+      (res as any).flushHeaders();
     }
 
+    const sendEvent = async (event: string, data: any) => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      if (typeof (res as any).flush === 'function') {
+        (res as any).flush();
+      }
+    };
+
+    try {
+      let documentText = req.body.text || '';
+      const language = req.body.language || 'en';
+
+      // Extract text from file payload if present before Guard 1
+      if (!documentText || documentText.trim().length < 5) {
+        if (req.file) {
+          documentText = extractAndCleanDocumentText(req.file.buffer, req.file.mimetype || '', req.file.originalname || '');
+        } else if (req.body.fileData) {
+          const base64Data = req.body.fileData.replace(/^data:.*?;base64,/, '');
+          const fileBuffer = Buffer.from(base64Data, 'base64');
+          documentText = extractAndCleanDocumentText(fileBuffer, req.body.fileType || 'image/jpeg', req.body.fileName || 'uploaded_doc.jpg');
+        }
+      }
+
+      // Stage 0: Guard 1 Check (Real AI Classification Inference)
+      await sendEvent('progress', { stage: 'guard1', stageIndex: 0, status: 'in_progress', label: 'Guard 1 Check' });
+      const t0 = Date.now();
+
+      let g1: { is_legal_document: boolean; category: string; confidence: number; rejection_reason?: string } = { is_legal_document: true, category: 'other', confidence: 0.9 };
+      if (documentText && documentText.trim().length >= 10) {
+        g1 = await runGuard1InputGateAsync(documentText);
+        if (!g1.is_legal_document) {
+          await sendEvent('error', { error: g1.rejection_reason || 'Document rejected by Guard 1 input gate.' });
+          res.end();
+          return;
+        }
+      }
+      const elapsed0 = Math.max(1, Date.now() - t0);
+      await sendEvent('progress', { stage: 'guard1', stageIndex: 0, status: 'completed', elapsed_ms: elapsed0 });
+
+      // Stage 1: OCR & Parsing (Real Content Extraction)
+      await sendEvent('progress', { stage: 'ocr_parsing', stageIndex: 1, status: 'in_progress', label: 'OCR & Parsing' });
+      const t1 = Date.now();
+      if (req.file) {
+        documentText = extractAndCleanDocumentText(req.file.buffer, req.file.mimetype || '', req.file.originalname || '');
+      } else if (req.body.fileData) {
+        const base64Data = req.body.fileData.replace(/^data:.*?;base64,/, '');
+        const fileBuffer = Buffer.from(base64Data, 'base64');
+        documentText = extractAndCleanDocumentText(fileBuffer, req.body.fileType || 'image/jpeg', req.body.fileName || 'uploaded_doc.jpg');
+      }
+
+      if (!documentText || documentText.trim().length < 10) {
+        await sendEvent('error', { error: 'Document content or file is required.' });
+        res.end();
+        return;
+      }
+
+      const g1Final = await runGuard1InputGateAsync(documentText);
+      if (!g1Final.is_legal_document) {
+        await sendEvent('error', { error: g1Final.rejection_reason || 'Document rejected by Guard 1 input gate.' });
+        res.end();
+        return;
+      }
+      const elapsed1 = Math.max(1, Date.now() - t1);
+      await sendEvent('progress', { stage: 'ocr_parsing', stageIndex: 1, status: 'completed', elapsed_ms: elapsed1 });
+
+      // Stage 2: Clause Chunking (Real Structural Clause Sectioning & Taxonomy Parsing)
+      await sendEvent('progress', { stage: 'clause_chunking', stageIndex: 2, status: 'in_progress', label: 'Clause Chunking' });
+      const t2 = Date.now();
+      const rawClauses = await chunkDocumentTextIntoClausesAsync(documentText);
+      const elapsed2 = Math.max(1, Date.now() - t2);
+      await sendEvent('progress', { stage: 'clause_chunking', stageIndex: 2, status: 'completed', elapsed_ms: elapsed2 });
+
+      // Stage 3: Risk Tagging (Real AI Per-Clause Risk Reasoning & Severity Grounding)
+      await sendEvent('progress', { stage: 'risk_tagging', stageIndex: 3, status: 'in_progress', label: 'Risk Tagging' });
+      const t3 = Date.now();
+      const clausesWithRisk = await applyRiskTaggingAndGroundingAsync(rawClauses, g1Final.category);
+      const elapsed3 = Math.max(1, Date.now() - t3);
+      await sendEvent('progress', { stage: 'risk_tagging', stageIndex: 3, status: 'completed', elapsed_ms: elapsed3 });
+
+      // Stage 4: AI Synthesis (Real Executive Summary & Plain-English Briefing Generation)
+      await sendEvent('progress', { stage: 'ai_synthesis', stageIndex: 4, status: 'in_progress', label: 'AI Synthesis' });
+      const t4 = Date.now();
+      const fullResult = await synthesizeDocumentAnalysis(documentText, clausesWithRisk, g1Final, req.body.categoryHint, language);
+      const elapsed4 = Math.max(1, Date.now() - t4);
+      await sendEvent('progress', { stage: 'ai_synthesis', stageIndex: 4, status: 'completed', elapsed_ms: elapsed4 });
+
+      // Return Final Result
+      await sendEvent('result', fullResult);
+      res.end();
+    } catch (err: any) {
+      const errMsg = err.message || 'Failed to analyze document.';
+      await sendEvent('error', { error: errMsg });
+      res.end();
+    }
+    return;
+  }
+
+  // Non-streaming fallback
+  try {
+    let documentText = req.body.text || '';
+    if (req.file) {
+      documentText = extractAndCleanDocumentText(req.file.buffer, req.file.mimetype || '', req.file.originalname || '');
+    }
     if (!documentText || documentText.trim().length < 10) {
       res.status(400).json({ error: 'Document content or file is required.' });
       return;
     }
-
     const result = await analyzeDocumentText(documentText, req.body.categoryHint, req.body.language || 'en');
     res.json(result);
   } catch (err: any) {
