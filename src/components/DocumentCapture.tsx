@@ -36,16 +36,30 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
   onInputContextChange,
 }) => {
   const { t } = useLanguage();
-  const [isMobile] = useState<boolean>(() => isMobileDevice());
+  const [isMobile, setIsMobile] = useState<boolean>(() => isMobileDevice());
   const [activeTab, setActiveTab] = useState<'upload' | 'camera' | 'sample'>(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       if (params.get('mode') === 'camera' || window.location.hash === '#camera') {
-        return 'camera';
+        if (isMobileDevice()) {
+          return 'camera';
+        }
       }
     }
     return isMobileDevice() ? 'camera' : 'upload';
   });
+
+  useEffect(() => {
+    const handleResize = () => {
+      const mobileState = isMobileDevice();
+      setIsMobile(mobileState);
+      if (!mobileState && activeTab === 'camera') {
+        setActiveTab('upload');
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [activeTab]);
 
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [cameraError, setCameraError] = useState<string>('');
@@ -271,17 +285,19 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
             <span>{t('capture.tab_upload')}</span>
           </button>
 
-          <button
-            onClick={() => setActiveTab('camera')}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all duration-200 ${
-              activeTab === 'camera'
-                ? 'bg-[#1E1B17] text-[#FBF8F1] font-bold shadow-xs'
-                : 'text-[#6E6659] hover:text-[#1E1B17]'
-            }`}
-          >
-            <Camera className="w-3.5 h-3.5" />
-            <span>{t('capture.tab_camera')}</span>
-          </button>
+          {isMobile && (
+            <button
+              onClick={() => setActiveTab('camera')}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all duration-200 ${
+                activeTab === 'camera'
+                  ? 'bg-[#1E1B17] text-[#FBF8F1] font-bold shadow-xs'
+                  : 'text-[#6E6659] hover:text-[#1E1B17]'
+              }`}
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span>{t('capture.tab_camera')}</span>
+            </button>
+          )}
 
           <button
             onClick={() => setActiveTab('sample')}
@@ -438,7 +454,7 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
       )}
 
       {/* Tab 2: Camera Live Scanner */}
-      {activeTab === 'camera' && (
+      {isMobile && activeTab === 'camera' && (
         <div className="space-y-4">
           {!capturedPhoto ? (
             <div className="relative bg-[#F6F1E7] rounded-xl overflow-hidden border border-[#E7E1D3] flex flex-col items-center justify-center min-h-[280px]">
