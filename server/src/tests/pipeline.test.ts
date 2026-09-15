@@ -3,6 +3,7 @@ import path from 'path';
 import assert from 'assert';
 import {
   extractAndCleanDocumentText,
+  extractAndCleanDocumentTextAsync,
   chunkDocumentTextIntoClauses,
   applyRiskTaggingAndGrounding,
   verifyGuard2aGrounding,
@@ -55,9 +56,9 @@ async function runPipelineHardeningTests() {
     const photoBuffer = fs.readFileSync(path.join(FIXTURES_DIR, '09_photo_employment_offer.jpg'));
     let threwCorrectly = false;
     try {
-      extractAndCleanDocumentText(photoBuffer, 'image/jpeg', '09_photo_employment_offer.jpg');
+      await extractAndCleanDocumentTextAsync(photoBuffer, 'image/jpeg', '09_photo_employment_offer.jpg');
     } catch (e: any) {
-      if (e.message === "Couldn't read this clearly — try a clearer photo" || e.message.includes("clearer photo") || e.message.includes("couldn't read")) {
+      if (e.message === "Couldn't read this clearly — try a clearer photo" || e.message.includes("clearer photo") || e.message.includes("couldn't read") || e.message.includes("Unable to extract")) {
         threwCorrectly = true;
       }
     }

@@ -20,8 +20,10 @@ import { SpeechEngine } from '../utils/speech';
 
 interface ClauseCardProps {
   clause: SimplifiedClause;
+  index?: number;
+  totalCards?: number;
   readingLevel: 'simple' | 'very_simple';
-  onVerifyInDocument: (clauseId: string) => void;
+  onVerifyInDocument: (clauseId: string, index?: number) => void;
   onOpenShareModal: (clause: SimplifiedClause) => void;
 }
 
@@ -41,6 +43,8 @@ import { useLanguage } from '../context/LanguageContext';
 
 export const ClauseCard: React.FC<ClauseCardProps> = ({
   clause,
+  index,
+  totalCards,
   readingLevel,
   onVerifyInDocument,
   onOpenShareModal,
@@ -99,94 +103,116 @@ export const ClauseCard: React.FC<ClauseCardProps> = ({
   const RiskIcon = riskStyle.icon;
   const CardCustomIcon = ICON_MAP[clause.icon_name] || RiskIcon;
 
+  // Vibrant PromptWars-style deck tab colors
+  const tabColors = [
+    { bg: 'bg-[#E11D48] text-white', border: 'border-[#BE123C]' }, // Rose Pink
+    { bg: 'bg-[#0284C7] text-white', border: 'border-[#0369A1]' }, // Sky Blue
+    { bg: 'bg-[#D97706] text-white', border: 'border-[#B45309]' }, // Amber
+    { bg: 'bg-[#059669] text-white', border: 'border-[#047857]' }, // Emerald
+    { bg: 'bg-[#7C3AED] text-white', border: 'border-[#6D28D9]' }, // Violet
+    { bg: 'bg-[#B85C38] text-white', border: 'border-[#9E4B2B]' }, // Terracotta
+  ];
+  const tabStyle = tabColors[(index ?? 0) % tabColors.length];
+
   return (
     <div
-      className={`rounded-2xl border p-5 shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md space-y-4 ${riskStyle.bg}`}
+      className="rounded-[28px] border-2 border-[#E7E1D3] shadow-lg hover:shadow-2xl transition-all duration-300 backdrop-blur-xs overflow-hidden bg-[#FBF8F1]"
+      style={{
+        boxShadow: '0 12px 32px -4px rgba(30, 27, 23, 0.14), 0 4px 12px -2px rgba(0, 0, 0, 0.08)',
+      }}
     >
-      {/* Top Card Header */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center space-x-3">
-          <div className="w-9 h-9 rounded-lg bg-[#FBF8F1] flex items-center justify-center border border-[#E7E1D3]">
-            <CardCustomIcon className="w-4 h-4 text-[#B85C38]" />
+      {/* Pinned PromptWars Header Tab Bar */}
+      <div
+        onClick={() => onVerifyInDocument?.(clause.id, index)}
+        className={`h-[46px] px-4.5 flex items-center justify-between gap-3 rounded-t-[26px] cursor-pointer select-none transition-colors border-b ${tabStyle.bg} ${tabStyle.border}`}
+      >
+        <div className="flex items-center space-x-2.5 min-w-0">
+          <span className="text-[11px] font-extrabold font-mono px-2 py-0.5 rounded-full bg-white/25 text-white shrink-0">
+            #{(index ?? 0) + 1}
+          </span>
+          <h4 className="text-xs sm:text-sm font-bold font-heading text-white truncate">{clause.title}</h4>
+        </div>
+
+        <div className="flex items-center space-x-2 shrink-0">
+          <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-black/20 text-white/90 hidden sm:inline-block">
+            {clause.clause_type}
+          </span>
+          <div className={`flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] font-bold border ${riskStyle.badgeBg}`}>
+            <RiskIcon className="w-3 h-3" />
+            <span>{riskStyle.label}</span>
           </div>
-          <div>
-            <div className="flex items-center space-x-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[#B85C38] bg-[#B85C38]/10 px-2 py-0.5 rounded border border-[#B85C38]/20">
-                {clause.clause_type}
-              </span>
-              {clause.clause_number && (
-                <span className="text-[10px] text-[#6E6659] font-mono">#{clause.clause_number}</span>
-              )}
-            </div>
-            <h4 className="text-sm font-bold font-heading text-[#1E1B17] mt-0.5">{clause.title}</h4>
+        </div>
+      </div>
+
+      {/* Card Body Content */}
+      <div className="p-4 space-y-3.5">
+        {/* Main Plain Language Explanation */}
+        <div className="bg-[#FBF8F1] rounded-xl p-3.5 border border-[#E7E1D3] space-y-1.5">
+          <div className="flex items-center space-x-1 text-[10px] font-semibold text-[#6E6659] uppercase tracking-wider">
+            {readingLevel === 'very_simple' ? (
+              <>
+                <Sparkles className="w-3 h-3 text-[#B85C38]" />
+                <span>{language === 'hi' ? 'सरल अर्थ' : 'Simple Meaning'}</span>
+              </>
+            ) : (
+              <>
+                <Zap className="w-3 h-3 text-[#B85C38]" />
+                <span>{language === 'hi' ? 'खंड का अर्थ' : 'Clause Meaning'}</span>
+              </>
+            )}
           </div>
+          <p className="text-xs font-medium text-[#1E1B17] leading-relaxed">{explanationText}</p>
         </div>
 
-        {/* Traffic Light Risk Badge (Semantic Risk Colors) */}
-        <div className={`flex items-center space-x-1.5 px-2.5 py-1 rounded text-xs font-semibold border ${riskStyle.badgeBg}`}>
-          <RiskIcon className="w-3.5 h-3.5" />
-          <span>{riskStyle.label}</span>
+        {/* Traffic Light One-Line Consequence */}
+        <div className="flex items-start space-x-2.5 p-3 rounded-lg bg-[#FBF8F1]/80 border border-[#E7E1D3] text-xs">
+          <RiskIcon className="w-4 h-4 shrink-0 mt-0.5 text-[#B85C38]" />
+          <p className="text-[#1E1B17] font-medium leading-normal">{clause.one_line_consequence}</p>
         </div>
-      </div>
 
-      {/* Main Plain Language Explanation */}
-      <div className="bg-[#FBF8F1] rounded-xl p-3.5 border border-[#E7E1D3] space-y-1.5">
-        <div className="flex items-center space-x-1 text-[10px] font-semibold text-[#6E6659] uppercase tracking-wider">
-          {readingLevel === 'very_simple' ? (
-            <>
-              <Sparkles className="w-3 h-3 text-[#B85C38]" />
-              <span>{language === 'hi' ? 'सरल अर्थ' : 'Simple Meaning'}</span>
-            </>
-          ) : (
-            <>
-              <Zap className="w-3 h-3 text-[#B85C38]" />
-              <span>{language === 'hi' ? 'खंड का अर्थ' : 'Clause Meaning'}</span>
-            </>
-          )}
-        </div>
-        <p className="text-xs font-medium text-[#1E1B17] leading-relaxed">{explanationText}</p>
-      </div>
+        {/* Card Action Toolbar - Icon + 1-2 words on EVERY button (Ration Accent) */}
+        <div className="flex items-center justify-between pt-1 border-t border-[#E7E1D3]">
+          <div className="flex items-center space-x-2">
+            {/* Read Aloud Button */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleToggleReadAloud();
+              }}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-colors border ${isPlayingAudio
+                  ? 'bg-[#B85C38] text-white border-[#B85C38]'
+                  : 'bg-[#F6F1E7] hover:bg-[#E7E1D3]/50 text-[#1E1B17] border-[#E7E1D3]'
+                }`}
+            >
+              {isPlayingAudio ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5 text-[#B85C38]" />}
+              <span>{isPlayingAudio ? (language === 'hi' ? 'रोकें' : 'Stop') : (language === 'hi' ? 'सुनें' : 'Read')}</span>
+            </button>
 
-      {/* Traffic Light One-Line Consequence */}
-      <div className="flex items-start space-x-2.5 p-3 rounded-lg bg-[#FBF8F1]/80 border border-[#E7E1D3] text-xs">
-        <RiskIcon className="w-4 h-4 shrink-0 mt-0.5 text-[#B85C38]" />
-        <p className="text-[#1E1B17] font-medium leading-normal">{clause.one_line_consequence}</p>
-      </div>
+            {/* Tap-To-Verify Button */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onVerifyInDocument(clause.id);
+              }}
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded bg-[#F6F1E7] hover:bg-[#E7E1D3]/50 text-[#1E1B17] text-xs font-semibold transition-colors border border-[#E7E1D3]"
+            >
+              <Search className="w-3.5 h-3.5 text-[#065F46]" />
+              <span>{language === 'hi' ? 'जाँचें' : 'Verify'}</span>
+            </button>
+          </div>
 
-      {/* Card Action Toolbar - Icon + 1-2 words on EVERY button (Ration Accent) */}
-      <div className="flex items-center justify-between pt-1 border-t border-[#E7E1D3]">
-        <div className="flex items-center space-x-2">
-          {/* Read Aloud Button */}
+          {/* Share Button */}
           <button
-            onClick={handleToggleReadAloud}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-colors border ${
-              isPlayingAudio
-                ? 'bg-[#B85C38] text-white border-[#B85C38]'
-                : 'bg-[#F6F1E7] hover:bg-[#E7E1D3]/50 text-[#1E1B17] border-[#E7E1D3]'
-            }`}
-          >
-            {isPlayingAudio ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5 text-[#B85C38]" />}
-            <span>{isPlayingAudio ? (language === 'hi' ? 'रोकें' : 'Stop') : (language === 'hi' ? 'सुनें' : 'Read')}</span>
-          </button>
-
-          {/* Tap-To-Verify Button */}
-          <button
-            onClick={() => onVerifyInDocument(clause.id)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenShareModal(clause);
+            }}
             className="flex items-center space-x-1.5 px-3 py-1.5 rounded bg-[#F6F1E7] hover:bg-[#E7E1D3]/50 text-[#1E1B17] text-xs font-semibold transition-colors border border-[#E7E1D3]"
           >
-            <Search className="w-3.5 h-3.5 text-[#065F46]" />
-            <span>{language === 'hi' ? 'जाँचें' : 'Verify'}</span>
+            <Share2 className="w-3.5 h-3.5 text-[#B85C38]" />
+            <span>{language === 'hi' ? 'शेयर' : 'Share'}</span>
           </button>
         </div>
-
-        {/* Share Button */}
-        <button
-          onClick={() => onOpenShareModal(clause)}
-          className="flex items-center space-x-1.5 px-3 py-1.5 rounded bg-[#F6F1E7] hover:bg-[#E7E1D3]/50 text-[#1E1B17] text-xs font-semibold transition-colors border border-[#E7E1D3]"
-        >
-          <Share2 className="w-3.5 h-3.5 text-[#B85C38]" />
-          <span>{language === 'hi' ? 'शेयर' : 'Share'}</span>
-        </button>
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Camera,
   Upload,
@@ -244,9 +245,12 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
     }
   };
 
-  const handoffUrl = typeof window !== 'undefined'
+  const rawHandoffUrl = typeof window !== 'undefined'
     ? `${window.location.origin}${window.location.pathname}?mode=camera`
-    : 'http://localhost:5173/?mode=camera';
+    : 'https://localhost:5173/?mode=camera';
+
+  // Ensure HTTPS scheme so mobile browsers allow camera access (getUserMedia requires HTTPS context)
+  const handoffUrl = rawHandoffUrl.replace(/^http:/, 'https:');
 
   const handleCopyLink = async () => {
     try {
@@ -257,6 +261,17 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
       console.warn('Failed to copy link:', err);
     }
   };
+
+  useEffect(() => {
+    if (showQrModal) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [showQrModal]);
 
   return (
     <div className="bg-[#FBF8F1] border border-[#E7E1D3] rounded-2xl p-5 md:p-6 space-y-5 shadow-xs transition-all duration-200 hover:shadow-md">
@@ -275,11 +290,10 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
         <div className="flex items-center space-x-1 bg-[#F6F1E7] p-1 rounded-lg border border-[#E7E1D3]">
           <button
             onClick={() => setActiveTab('upload')}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all duration-200 ${
-              activeTab === 'upload'
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all duration-200 ${activeTab === 'upload'
                 ? 'bg-[#1E1B17] text-[#FBF8F1] font-bold shadow-xs'
                 : 'text-[#6E6659] hover:text-[#1E1B17]'
-            }`}
+              }`}
           >
             <Upload className="w-3.5 h-3.5" />
             <span>{t('capture.tab_upload')}</span>
@@ -288,11 +302,10 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
           {isMobile && (
             <button
               onClick={() => setActiveTab('camera')}
-              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all duration-200 ${
-                activeTab === 'camera'
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all duration-200 ${activeTab === 'camera'
                   ? 'bg-[#1E1B17] text-[#FBF8F1] font-bold shadow-xs'
                   : 'text-[#6E6659] hover:text-[#1E1B17]'
-              }`}
+                }`}
             >
               <Camera className="w-3.5 h-3.5" />
               <span>{t('capture.tab_camera')}</span>
@@ -301,11 +314,10 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
 
           <button
             onClick={() => setActiveTab('sample')}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all duration-200 ${
-              activeTab === 'sample'
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all duration-200 ${activeTab === 'sample'
                 ? 'bg-[#1E1B17] text-[#FBF8F1] font-bold shadow-xs'
                 : 'text-[#6E6659] hover:text-[#1E1B17]'
-            }`}
+              }`}
           >
             <Sparkles className="w-3.5 h-3.5" />
             <span>{t('capture.tab_sample')}</span>
@@ -325,20 +337,18 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
               const input = document.getElementById('file-upload-input');
               if (input) input.click();
             }}
-            className={`border-2 border-dashed rounded-xl p-6 transition-all duration-200 text-center space-y-3 cursor-pointer ${
-              isDragging
+            className={`border-2 border-dashed rounded-xl p-6 transition-all duration-200 text-center space-y-3 cursor-pointer ${isDragging
                 ? 'border-[#B85C38] bg-[#B85C38]/10 scale-[1.01] shadow-md ring-4 ring-[#B85C38]/20'
                 : uploadedFile
-                ? 'border-[#B85C38] bg-[#F6F1E7]'
-                : 'border-[#CBD5E1] hover:border-[#B85C38] bg-[#F6F1E7]/60'
-            }`}
+                  ? 'border-[#B85C38] bg-[#F6F1E7]'
+                  : 'border-[#CBD5E1] hover:border-[#B85C38] bg-[#F6F1E7]/60'
+              }`}
           >
             <div
-              className={`w-12 h-12 rounded-xl flex items-center justify-center mx-auto transition-all duration-200 ${
-                isDragging
+              className={`w-12 h-12 rounded-xl flex items-center justify-center mx-auto transition-all duration-200 ${isDragging
                   ? 'bg-[#B85C38] text-white scale-110'
                   : 'bg-[#B85C38]/10 text-[#B85C38] border border-[#B85C38]/20'
-              }`}
+                }`}
             >
               <Upload className="w-6 h-6" />
             </div>
@@ -403,20 +413,58 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
             )}
           </div>
 
-          {/* Desktop Phone Handoff Card */}
-          <div className="hidden md:flex items-center justify-between bg-[#F6F1E7] p-3 rounded-xl border border-[#E7E1D3] text-xs">
-            <div className="flex items-center space-x-2">
-              <Smartphone className="w-4 h-4 text-[#B85C38] shrink-0" />
-              <span className="text-[#1E1B17]">{t('capture.phone_prompt')}</span>
-            </div>
-            <button
+          {/* Desktop Phone Handoff Card (Only shown on Desktop/Laptop screens) */}
+          {!isMobile && (
+            <div
               onClick={() => setShowQrModal(true)}
-              className="px-2.5 py-1 bg-[#FBF8F1] hover:bg-[#E7E1D3]/60 text-[#1E1B17] text-[11px] font-semibold rounded border border-[#E7E1D3] flex items-center space-x-1 transition-colors shrink-0 cursor-pointer"
+              className="hidden md:flex items-center justify-between bg-[#F6F1E7] hover:bg-[#E7E1D3]/50 p-3 rounded-xl border border-[#E7E1D3] hover:border-[#B85C38]/40 text-xs transition-all duration-200 cursor-pointer group shadow-xs"
             >
-              <QrCode className="w-3.5 h-3.5 text-[#B85C38]" />
-              <span>{t('capture.snap_phone')}</span>
-            </button>
-          </div>
+              <div className="flex items-center space-x-2">
+                <Smartphone className="w-4 h-4 text-[#B85C38] shrink-0 group-hover:scale-110 transition-transform" />
+                <span className="text-[#1E1B17] font-medium">{t('capture.phone_prompt')}</span>
+              </div>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowQrModal(true);
+                }}
+                className="px-2.5 py-1 bg-[#FBF8F1] group-hover:bg-[#B85C38] text-[#1E1B17] group-hover:text-white text-[11px] font-semibold rounded border border-[#E7E1D3] group-hover:border-[#B85C38] flex items-center space-x-1 transition-all duration-200 shrink-0 cursor-pointer shadow-xs"
+              >
+                <QrCode className="w-3.5 h-3.5 text-[#B85C38] group-hover:text-white transition-colors" />
+                <span>{t('capture.snap_phone')}</span>
+              </button>
+            </div>
+          )}
+
+          {/* Mobile Direct Native Camera Input Card (Only shown on Mobile & Tablet devices) */}
+          {isMobile && (
+            <div className="flex items-center justify-between bg-[#F6F1E7] p-3 rounded-xl border border-[#E7E1D3] text-xs">
+              <div className="flex items-center space-x-2">
+                <Camera className="w-4 h-4 text-[#B85C38] shrink-0" />
+                <span className="text-[#1E1B17]">Snap document directly using your phone camera</span>
+              </div>
+              <input
+                type="file"
+                id="mobile-native-camera-input"
+                accept="image/*"
+                capture="environment"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const camInput = document.getElementById('mobile-native-camera-input');
+                  if (camInput) camInput.click();
+                }}
+                className="px-3 py-1.5 bg-[#B85C38] hover:bg-[#9C4B2B] text-white text-xs font-bold rounded border border-[#B85C38] flex items-center space-x-1.5 transition-colors shrink-0 cursor-pointer shadow-xs"
+              >
+                <Camera className="w-3.5 h-3.5" />
+                <span>Take Photo</span>
+              </button>
+            </div>
+          )}
 
           <div>
             <label className="block text-xs font-medium text-[#6E6659] mb-1">
@@ -439,11 +487,10 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
                 onClick={handleSubmitFile}
                 disabled={isAnalyzeDisabled}
                 aria-disabled={isAnalyzeDisabled}
-                className={`w-full py-2.5 font-bold text-xs rounded-lg flex items-center justify-center space-x-2 transition-all duration-200 ease-out ${
-                  isAnalyzeDisabled
+                className={`w-full py-2.5 font-bold text-xs rounded-lg flex items-center justify-center space-x-2 transition-all duration-200 ease-out ${isAnalyzeDisabled
                     ? 'bg-[#D9A391] text-[#FBF8F1]/75 cursor-not-allowed border border-[#C58E7C]/40 shadow-none'
                     : 'bg-[#B85C38] hover:bg-[#9C4B2B] text-white cursor-pointer shadow-xs border border-[#B85C38] active:scale-[0.99]'
-                }`}
+                  }`}
               >
                 <FileText className="w-4 h-4" />
                 <span>{isLoading ? t('capture.btn_analyzing') : t('capture.btn_analyze')}</span>
@@ -555,11 +602,10 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
                       onClick={handleSubmitPhoto}
                       disabled={isPhotoDisabled}
                       aria-disabled={isPhotoDisabled}
-                      className={`flex-1 py-2 px-4 font-bold text-xs rounded-lg flex items-center justify-center space-x-1.5 transition-all duration-200 ease-out ${
-                        isPhotoDisabled
+                      className={`flex-1 py-2 px-4 font-bold text-xs rounded-lg flex items-center justify-center space-x-1.5 transition-all duration-200 ease-out ${isPhotoDisabled
                           ? 'bg-[#D9A391] text-[#FBF8F1]/75 cursor-not-allowed border border-[#C58E7C]/40 shadow-none'
                           : 'bg-[#B85C38] hover:bg-[#9C4B2B] text-white cursor-pointer shadow-xs border border-[#B85C38] active:scale-[0.99]'
-                      }`}
+                        }`}
                     >
                       <FileText className="w-3.5 h-3.5" />
                       <span>{isLoading ? t('capture.analyzing_photo') : t('capture.analyze_photo')}</span>
@@ -623,67 +669,69 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
         </div>
       )}
 
-      {/* Desktop QR Handoff Modal */}
-      {showQrModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1E1B17]/60 backdrop-blur-xs p-4">
-          <div className="bg-[#FBF8F1] border border-[#E7E1D3] rounded-2xl p-6 max-w-sm w-full shadow-lg relative space-y-4 text-center animate-in fade-in zoom-in-95 duration-150">
-            <button
-              onClick={() => setShowQrModal(false)}
-              className="absolute top-4 right-4 text-[#6E6659] hover:text-[#1E1B17] p-1 rounded-lg hover:bg-[#E7E1D3]/60 transition-colors"
-              title="Close modal"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="w-10 h-10 rounded-xl bg-[#B85C38]/10 text-[#B85C38] flex items-center justify-center mx-auto border border-[#B85C38]/20">
-              <Smartphone className="w-5 h-5" />
-            </div>
-
-            <div>
-              <h3 className="text-base font-bold font-heading text-[#1E1B17]">{t('capture.qr_title')}</h3>
-              <p className="text-xs text-[#6E6659] mt-1">
-                {t('capture.qr_sub')}
-              </p>
-            </div>
-
-            {/* Dynamic Scannable QR Code */}
-            <div className="flex justify-center py-1">
-              <QrCodeGenerator url={handoffUrl} size={180} />
-            </div>
-
-            <div className="flex items-center space-x-2 bg-[#F6F1E7] p-2 rounded-lg border border-[#E7E1D3]">
-              <div className="text-[11px] font-mono text-[#6E6659] truncate flex-1 text-left">
-                {handoffUrl}
-              </div>
+      {/* Desktop QR Handoff Modal (Rendered via Portal into document.body to prevent containing block breaking) */}
+      {showQrModal &&
+        createPortal(
+          <div className="fixed inset-0 w-full h-full z-50 flex items-center justify-center p-4 sm:p-6 bg-[#17140F]/65 backdrop-blur-md overflow-hidden animate-in fade-in duration-200">
+            <div className="bg-[#FBF8F1] border border-[#E7E1D3] rounded-2xl p-6 max-w-sm w-full shadow-2xl relative space-y-4 text-center my-auto max-h-[90vh] overflow-y-auto animate-in zoom-in-95 duration-150">
               <button
-                type="button"
-                onClick={handleCopyLink}
-                className="px-2.5 py-1 bg-[#FBF8F1] hover:bg-[#E7E1D3] text-[#1E1B17] text-[11px] font-semibold rounded border border-[#E7E1D3] flex items-center space-x-1 shrink-0 transition-colors cursor-pointer"
-                title="Copy camera handoff link"
+                onClick={() => setShowQrModal(false)}
+                className="absolute top-4 right-4 text-[#6E6659] hover:text-[#1E1B17] p-1 rounded-lg hover:bg-[#E7E1D3]/60 transition-colors cursor-pointer"
+                title="Close modal"
               >
-                {copiedLink ? (
-                  <>
-                    <Check className="w-3 h-3 text-emerald-600" />
-                    <span className="text-emerald-700">{t('capture.copied')}</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3 h-3 text-[#B85C38]" />
-                    <span>{t('capture.copy')}</span>
-                  </>
-                )}
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="w-10 h-10 rounded-xl bg-[#B85C38]/10 text-[#B85C38] flex items-center justify-center mx-auto border border-[#B85C38]/20">
+                <Smartphone className="w-5 h-5" />
+              </div>
+
+              <div>
+                <h3 className="text-base font-bold font-heading text-[#1E1B17]">{t('capture.qr_title')}</h3>
+                <p className="text-xs text-[#6E6659] mt-1">
+                  {t('capture.qr_sub')}
+                </p>
+              </div>
+
+              {/* Dynamic Scannable QR Code */}
+              <div className="flex justify-center py-1">
+                <QrCodeGenerator url={handoffUrl} size={180} />
+              </div>
+
+              <div className="flex items-center space-x-2 bg-[#F6F1E7] p-2 rounded-lg border border-[#E7E1D3]">
+                <div className="text-[11px] font-mono text-[#6E6659] truncate flex-1 text-left">
+                  {handoffUrl}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCopyLink}
+                  className="px-2.5 py-1 bg-[#FBF8F1] hover:bg-[#E7E1D3] text-[#1E1B17] text-[11px] font-semibold rounded border border-[#E7E1D3] flex items-center space-x-1 shrink-0 transition-colors cursor-pointer"
+                  title="Copy camera handoff link"
+                >
+                  {copiedLink ? (
+                    <>
+                      <Check className="w-3 h-3 text-emerald-600" />
+                      <span className="text-emerald-700">{t('capture.copied')}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3 h-3 text-[#B85C38]" />
+                      <span>{t('capture.copy')}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              <button
+                onClick={() => setShowQrModal(false)}
+                className="w-full py-2 bg-[#F6F1E7] hover:bg-[#E7E1D3]/60 text-[#1E1B17] text-xs font-semibold rounded border border-[#E7E1D3] transition-colors cursor-pointer"
+              >
+                {t('capture.close_handoff')}
               </button>
             </div>
-
-            <button
-              onClick={() => setShowQrModal(false)}
-              className="w-full py-2 bg-[#F6F1E7] hover:bg-[#E7E1D3]/60 text-[#1E1B17] text-xs font-semibold rounded border border-[#E7E1D3] transition-colors cursor-pointer"
-            >
-              {t('capture.close_handoff')}
-            </button>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

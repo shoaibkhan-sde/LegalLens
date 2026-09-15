@@ -158,9 +158,14 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab }) => {
             <button
               onClick={scrollToTop}
               title="Back to top"
-              className="p-2.5 rounded-xl bg-[#28221A] hover:bg-[#383025] text-white shadow-md transition-all duration-200 hover:scale-105 active:scale-95 border border-[#3D3428] flex items-center justify-center"
+              className="group relative px-3.5 py-2 rounded-xl bg-[#28221A] hover:bg-[#B85C38] text-white shadow-lg transition-all duration-300 hover:scale-105 active:scale-95 border border-[#3D3428] hover:border-[#D97757] flex items-center space-x-1.5 overflow-hidden"
             >
-              <ArrowUp className="w-5 h-5 text-[#D97757]" />
+              <div className="animate-arrow-lift transition-transform duration-300 group-hover:-translate-y-1">
+                <ArrowUp className="w-5 h-5 text-[#D97757] group-hover:text-white transition-colors" />
+              </div>
+              <span className="text-[11px] font-extrabold font-heading uppercase tracking-wider text-[#E2DDD3] group-hover:text-white hidden sm:inline-block">
+                Top
+              </span>
             </button>
           </div>
         </div>

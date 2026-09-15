@@ -35,21 +35,26 @@
   }
 }
 
-/* Custom Vector Art Mouse Pointer Cursors */
+/* Custom Vector Mouse Pointer Cursor for Default State */
 body,
 html {
   cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M3 3l7 18 3.5-7.5L21 10 3 3z' fill='%23FBF8F1' stroke='%231E1B17' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M3 3l7 18 3.5-7.5L21 10 3 3z' fill='%23B85C38' opacity='0.3'/%3E%3C/svg%3E") 3 3, auto;
 }
 
+/* Standard OS Finger Pointer Cursor for All Clickable & Interactive Hover States */
 button,
 a,
 select,
 input[type="submit"],
 input[type="button"],
+input[type="checkbox"],
+input[type="radio"],
 [role="button"],
 label,
-.cursor-pointer {
-  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M3 3l7 18 3.5-7.5L21 10 3 3z' fill='%23B85C38' stroke='%231E1B17' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M3 3l7 18 3.5-7.5L21 10 3 3z' fill='%23FFFFFF' opacity='0.35'/%3E%3C/svg%3E") 3 3, pointer !important;
+.cursor-pointer,
+[onClick],
+[onclick] {
+  cursor: pointer !important;
 }
 
 /* Custom scrollbars */
@@ -109,50 +114,68 @@ label,
 
 /* 3D Robo Face Animation Keyframes */
 @keyframes roboEyeBlink {
-  0%, 88%, 100% {
+
+  0%,
+  88%,
+  100% {
     transform: scaleY(0);
     opacity: 0;
   }
-  92%, 96% {
+
+  92%,
+  96% {
     transform: scaleY(1);
     opacity: 0.95;
   }
 }
 
 @keyframes roboSmileBounce {
-  0%, 100% {
+
+  0%,
+  100% {
     transform: scale(1) translateY(0) rotate(0deg);
   }
+
   30% {
     transform: scale(1.12) translateY(-6px) rotate(-3deg);
   }
+
   60% {
     transform: scale(1.06) translateY(-2px) rotate(2deg);
   }
 }
 
 @keyframes roboAntennaGlow {
-  0%, 100% {
+
+  0%,
+  100% {
     box-shadow: 0 0 12px rgba(56, 189, 248, 0.4), 0 0 24px rgba(56, 189, 248, 0.2);
   }
+
   50% {
     box-shadow: 0 0 24px rgba(56, 189, 248, 0.8), 0 0 48px rgba(56, 189, 248, 0.5);
   }
 }
 
 @keyframes roboJumpAnimation {
-  0%, 100% {
+
+  0%,
+  100% {
     transform: translateY(0) scale(1);
   }
+
   25% {
     transform: translateY(-10px) scale(1.04);
   }
+
   45% {
     transform: translateY(-15px) scale(1.08) rotate(-2deg);
   }
+
   65% {
     transform: translateY(-3px) scale(0.97) rotate(1.5deg);
   }
+
   80% {
     transform: translateY(-1px) scale(1.01);
   }
@@ -177,9 +200,12 @@ label,
 
 /* Cool Built For Everyone Section Animations */
 @keyframes coolHeroFloat {
-  0%, 100% {
+
+  0%,
+  100% {
     transform: translateY(0px);
   }
+
   50% {
     transform: translateY(-8px);
   }
@@ -189,9 +215,11 @@ label,
   0% {
     background-position: 0% 50%;
   }
+
   50% {
     background-position: 100% 50%;
   }
+
   100% {
     background-position: 0% 50%;
   }
@@ -214,6 +242,7 @@ label,
   0% {
     transform: translate3d(0, 0, 0);
   }
+
   100% {
     transform: translate3d(-50%, 0, 0);
   }
@@ -224,8 +253,25 @@ label,
   will-change: transform;
 }
 
+/* Upward Lift Motion Animation for Footer Back to Top Arrow */
+@keyframes arrowLiftPulse {
+  0%, 100% {
+    transform: translateY(0px);
+    opacity: 0.85;
+  }
+  50% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+}
+
+.animate-arrow-lift {
+  animation: arrowLiftPulse 1.8s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .animate-footer-drift {
+  .animate-footer-drift,
+  .animate-arrow-lift {
     animation: none !important;
   }
 }

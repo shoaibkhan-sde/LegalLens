@@ -30,6 +30,17 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ currentDocument 
   const hasDocB = Boolean(docBText.trim());
   const isCompareDisabled = !hasDocA || !hasDocB || isLoading;
 
+  React.useEffect(() => {
+    if (errorMessage) {
+      setTimeout(() => {
+        const errorBanner = document.getElementById('comparison-error-banner');
+        if (errorBanner) {
+          errorBanner.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 120);
+    }
+  }, [errorMessage]);
+
   const handleRunComparison = async () => {
     if (isCompareDisabled) return;
 
@@ -83,14 +94,24 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ currentDocument 
 
       {/* Error Message Banner */}
       {errorMessage && (
-        <div className="bg-[#FFF5F5] border border-[#FCA5A5] rounded-xl p-4 flex items-center justify-between text-xs text-[#991B1B] shadow-xs animate-fade-in-up">
-          <div className="flex items-center space-x-2">
-            <AlertTriangle className="w-4 h-4 text-[#B85C38] shrink-0" />
-            <span className="font-semibold">{errorMessage}</span>
+        <div
+          id="comparison-error-banner"
+          className="bg-[#FFF5F5] border-2 border-[#FCA5A5] rounded-2xl p-4 flex items-center justify-between text-xs text-[#991B1B] shadow-md animate-fade-in-up scroll-mt-28 ring-4 ring-[#991B1B]/15"
+        >
+          <div className="flex items-center space-x-3">
+            <div className="w-9 h-9 rounded-xl bg-[#991B1B]/10 flex items-center justify-center shrink-0 border border-[#991B1B]/20">
+              <AlertTriangle className="w-5 h-5 text-[#991B1B]" />
+            </div>
+            <div>
+              <div className="font-bold text-[11px] uppercase tracking-wider text-[#991B1B]">
+                Comparison Validation Alert
+              </div>
+              <span className="font-semibold text-xs text-[#7F1D1D] mt-0.5 block">{errorMessage}</span>
+            </div>
           </div>
           <button
             onClick={() => setErrorMessage(null)}
-            className="p-1 rounded hover:bg-[#FCA5A5]/30 text-[#991B1B] font-bold text-sm transition-colors cursor-pointer"
+            className="p-1.5 rounded-lg hover:bg-[#FCA5A5]/40 text-[#991B1B] font-bold text-sm transition-colors cursor-pointer shrink-0"
             title="Dismiss error"
           >
             ✕

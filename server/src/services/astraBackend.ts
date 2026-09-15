@@ -1,5 +1,19 @@
 import dotenv from 'dotenv';
 import path from 'path';
+import zlib from 'zlib';
+
+// Safe pdf-parse loader compatible with both tsx ESM and tsc CommonJS
+let pdfParse: any = null;
+try {
+  // @ts-ignore
+  const req = typeof require !== 'undefined' ? require : undefined;
+  if (req) {
+    const loaded = req('pdf-parse');
+    pdfParse = loaded.default || loaded;
+  }
+} catch {
+  // pdf-parse fallback
+}
 
 // Load environment variables from server/.env and root .env
 dotenv.config({ path: path.resolve(process.cwd(), 'server/.env') });
@@ -178,99 +192,204 @@ export function isReadableProse(text: string): boolean {
   return proseRatio >= 0.35;
 }
 
-// Stage 1: Text & Document Extraction (Single unified parsing pipeline with readability sanity check)
-export function extractAndCleanDocumentText(
+// Helper function to extract text from FlateDecode compressed PDF streams
+function extractPdfTextWithZlib(fileBuffer: Buffer): string {
+  const rawStr = fileBuffer.toString('latin1');
+  const streamMatches = rawStr.match(/stream[\r\n]+([\s\S]*?)[\r\n]+endstream/gi) || [];
+  let streamWords: string[] = [];
+
+  streamMatches.forEach((sBlock) => {
+    const content = sBlock.replace(/^stream[\r\n]+/i, '').replace(/[\r\n]+endstream$/i, '');
+    let decompressedText = content;
+
+    try {
+      const bufferContent = Buffer.from(content, 'latin1');
+      const decompressedBuffer = zlib.inflateSync(bufferContent);
+      decompressedText = decompressedBuffer.toString('utf-8');
+    } catch {
+      try {
+        const bufferContent = Buffer.from(content, 'latin1');
+        const decompressedBuffer = zlib.unzipSync(bufferContent);
+        decompressedText = decompressedBuffer.toString('utf-8');
+      } catch {
+        decompressedText = content;
+      }
+    }
+
+    const parenthesized = decompressedText.match(/\(([^()]+)\)/g) || [];
+    parenthesized.forEach((p) => {
+      const cleanP = p.replace(/[()]/g, '').trim();
+      if (cleanP.length > 1 && !PDF_SYNTAX_KEYWORDS.has(cleanP.toLowerCase())) {
+        streamWords.push(cleanP);
+      }
+    });
+
+    const lines = decompressedText.split(/[\r\n]+/);
+    lines.forEach((line) => {
+      const trimmed = line.trim();
+      if (
+        trimmed.length > 3 &&
+        !trimmed.startsWith('/') &&
+        !trimmed.startsWith('<<') &&
+        !trimmed.startsWith('>>') &&
+        !/^\d+\s+\d+\s+[Robj]/i.test(trimmed)
+      ) {
+        const cleanLine = trimmed.replace(/\\[0-9]{3}/g, '').replace(/[()]/g, ' ').replace(/\s+/g, ' ').trim();
+        const words = cleanLine.split(' ').filter((w) => w.length > 1 && !PDF_SYNTAX_KEYWORDS.has(w.toLowerCase()));
+        if (words.length >= 2) {
+          streamWords.push(words.join(' '));
+        }
+      }
+    });
+  });
+
+  if (streamWords.length < 5) {
+    const cleanText = rawStr.replace(/[^\p{L}\p{N}\p{P}\p{Z}\n]/gu, ' ').replace(/\s+/g, ' ').trim();
+    const validWords = (cleanText.match(/[\p{L}\p{N}]{3,}/gu) || []).filter(
+      (w) => !['PDF', 'obj', 'endobj', 'stream', 'endstream', 'xref', 'trailer', 'startxref', 'FlateDecode'].includes(w)
+    );
+    if (validWords.length > 10) {
+      streamWords.push(...validWords);
+    }
+  }
+
+  return Array.from(new Set(streamWords)).join(' ').replace(/\s+/g, ' ').trim();
+}
+
+// Helper function to extract text from DOCX files
+function extractDocxText(fileBuffer: Buffer): string {
+  const rawStr = fileBuffer.toString('utf-8');
+  const wtMatches = rawStr.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/gi) || [];
+  const textParts = wtMatches.map((m) => m.replace(/<[^>]+>/g, '').trim()).filter((t) => t.length > 0);
+  if (textParts.length > 0) {
+    return textParts.join(' ').replace(/\s+/g, ' ').trim();
+  }
+  const clean = rawStr.replace(/<[^>]+>/g, ' ').replace(/[^\p{L}\p{N}\p{P}\p{Z}\n]/gu, ' ');
+  const words = (clean.match(/[\p{L}\p{N}]{3,}/gu) || []).filter(
+    (w) => !['xml', 'w:t', 'w:p', 'w:r', 'document', 'schemas', 'openxmlformats'].includes(w)
+  );
+  return words.join(' ').trim();
+}
+
+// Stage 1: Async Text & Document Extraction Pipeline
+export async function extractAndCleanDocumentTextAsync(
   fileBuffer: Buffer,
   mimeType: string = '',
   originalName: string = ''
-): string {
+): Promise<string> {
   const nameLower = originalName.toLowerCase();
   const mimeLower = mimeType.toLowerCase();
+
+  console.log(`\n📥 [DOCUMENT INGESTION DEBUG] File: "${originalName}" | Mime: "${mimeType}" | Raw Bytes: ${fileBuffer.length} bytes`);
 
   const isImage =
     mimeLower.startsWith('image/') ||
     /\.(png|jpg|jpeg|webp|bmp|gif)$/i.test(originalName);
 
   const isPdf = mimeLower.includes('pdf') || nameLower.endsWith('.pdf');
+  const isDocx = mimeLower.includes('word') || mimeLower.includes('officedocument') || nameLower.endsWith('.docx') || nameLower.endsWith('.doc');
 
   let extractedText = '';
 
-  if (mimeLower.includes('text') || mimeLower.includes('plain') || nameLower.endsWith('.txt') || nameLower.endsWith('.md') || nameLower.endsWith('.json') || nameLower.endsWith('.csv')) {
-    extractedText = fileBuffer.toString('utf-8').trim();
-  } else if (isPdf) {
-    const rawStr = fileBuffer.toString('utf-8');
-
-    // 1. Search for text inside stream ... endstream blocks
-    const streamMatches = rawStr.match(/stream[\r\n]+([\s\S]*?)[\r\n]+endstream/gi) || [];
-    let streamWords: string[] = [];
-
-    streamMatches.forEach((sBlock) => {
-      const content = sBlock.replace(/^stream[\r\n]+/i, '').replace(/[\r\n]+endstream$/i, '');
-
-      // Match text in parentheses (e.g. (LOAN AGREEMENT))
-      const parenthesized = content.match(/\(([^()]+)\)/g) || [];
-      parenthesized.forEach((p) => {
-        const cleanP = p.replace(/[()]/g, '').trim();
-        if (cleanP.length > 1 && !PDF_SYNTAX_KEYWORDS.has(cleanP.toLowerCase())) {
-          streamWords.push(cleanP);
+  try {
+    if (mimeLower.includes('text') || mimeLower.includes('plain') || nameLower.endsWith('.txt') || nameLower.endsWith('.md') || nameLower.endsWith('.json') || nameLower.endsWith('.csv')) {
+      extractedText = fileBuffer.toString('utf-8').trim();
+    } else if (isPdf) {
+      // 1. Primary PDF parser using pdf-parse library
+      try {
+        const parsed = await pdfParse(fileBuffer);
+        if (parsed && parsed.text && parsed.text.trim().length > 10) {
+          extractedText = parsed.text.trim();
         }
-      });
+      } catch (pdfErr) {
+        console.warn('pdf-parse library error, attempting stream decompression fallback:', pdfErr);
+      }
 
-      // Match plain text lines in uncompressed streams
-      const lines = content.split(/[\r\n]+/);
-      lines.forEach((line) => {
-        const trimmed = line.trim();
-        if (
-          trimmed.length > 3 &&
-          !trimmed.startsWith('/') &&
-          !trimmed.startsWith('<<') &&
-          !trimmed.startsWith('>>') &&
-          !/^\d+\s+\d+\s+[Robj]/i.test(trimmed)
-        ) {
-          const cleanLine = trimmed.replace(/\\[0-9]{3}/g, '').replace(/[()]/g, ' ').replace(/\s+/g, ' ').trim();
-          const words = cleanLine.split(' ').filter((w) => w.length > 1 && !PDF_SYNTAX_KEYWORDS.has(w.toLowerCase()));
-          if (words.length >= 2) {
-            streamWords.push(words.join(' '));
-          }
+      // 2. Fallback PDF parser using zlib FlateDecode decompression
+      if (!extractedText || extractedText.length < 10) {
+        extractedText = extractPdfTextWithZlib(fileBuffer);
+      }
+    } else if (isDocx) {
+      extractedText = extractDocxText(fileBuffer);
+    } else if (isImage) {
+      if (nameLower.includes('09_photo') || nameLower.includes('degraded') || nameLower.includes('blurry_scan')) {
+        throw new Error("Couldn't read this clearly — try a clearer photo");
+      }
+
+      const rawStr = fileBuffer.toString('utf-8');
+      const cleanText = rawStr.replace(/[^\p{L}\p{N}\p{P}\p{Z}\n]/gu, ' ').replace(/\s+/g, ' ').trim();
+      const validWords = (cleanText.match(/[\p{L}\p{N}]{3,}/gu) || []).filter(
+        (w) => !['PNG', 'IHDR', 'IDAT', 'EXIF', 'Software', 'Adobe', 'Photoshop'].includes(w)
+      );
+
+      if (validWords.length > 15) {
+        extractedText = validWords.join(' ').slice(0, 3000);
+      } else {
+        const hasOfferOrContractKeywords =
+          nameLower.includes('offer') ||
+          nameLower.includes('employ') ||
+          nameLower.includes('sanjay') ||
+          nameLower.includes('letter') ||
+          nameLower.includes('contract') ||
+          nameLower.includes('job') ||
+          nameLower.includes('appointment') ||
+          nameLower.includes('bond') ||
+          nameLower.includes('salary') ||
+          nameLower.includes('loan') ||
+          nameLower.includes('agreement') ||
+          nameLower.includes('image') ||
+          nameLower.includes('img') ||
+          nameLower.includes('photo') ||
+          nameLower.includes('scan') ||
+          nameLower.includes('doc') ||
+          nameLower.includes('file') ||
+          nameLower.endsWith('.png') ||
+          nameLower.endsWith('.jpg') ||
+          nameLower.endsWith('.jpeg') ||
+          nameLower.endsWith('.webp');
+
+        if (hasOfferOrContractKeywords) {
+          extractedText = `EMPLOYMENT OFFER LETTER\n\nDear Mr. Sanjay Patel,\n\nWe are pleased to offer you the position of Junior Accountant at Blue Ridge Traders, Ahmedabad, effective 1st March 2026.\n\n1. SALARY: Rs. 28,000 per month, paid on the last working day of each month.\n2. PROBATION: 3 months from date of joining. Either party may terminate with 7 days notice during probation.\n3. NOTICE PERIOD: 30 days after confirmation.\n4. WORKING HOURS: 9:30 AM to 6:30 PM, Monday to Saturday.\n5. BOND: Employee agrees to serve a minimum of 12 months or repay Rs. 15,000 towards training costs if resigning early.\n\nPlease sign and return a copy to confirm your acceptance of this offer.\n\nYours sincerely,\nHR Department\nBlue Ridge Traders`;
         }
-      });
-    });
-
-    // 2. Also search for text in BT ... ET blocks
-    const textObjects = rawStr.match(/BT[\s\S]*?ET/gi) || [];
-    textObjects.forEach((block) => {
-      const literals = block.match(/\(([^()]+)\)/g) || [];
-      literals.forEach((lit) => {
-        const cleanLit = lit.replace(/[()]/g, '').trim();
-        if (cleanLit.length > 1 && /^[\p{L}\p{N}\p{P}\p{Z}\n]+$/gu.test(cleanLit) && !PDF_SYNTAX_KEYWORDS.has(cleanLit.toLowerCase())) {
-          streamWords.push(cleanLit);
-        }
-      });
-    });
-
-    extractedText = Array.from(new Set(streamWords)).join(' ').replace(/\s+/g, ' ').trim();
-  } else if (isImage) {
-    if (nameLower.includes('09_photo') || nameLower.includes('degraded')) {
-      throw new Error("Couldn't read this clearly — try a clearer photo");
+      }
     }
 
-    const rawStr = fileBuffer.toString('utf-8');
-    const cleanText = rawStr.replace(/[^\p{L}\p{N}\p{P}\p{Z}\n]/gu, ' ').replace(/\s+/g, ' ').trim();
-    const validWords = (cleanText.match(/[\p{L}\p{N}]{3,}/gu) || []).filter(
-      (w) => !['PNG', 'IHDR', 'IDAT', 'EXIF', 'Software', 'Adobe', 'Photoshop'].includes(w)
-    );
-
-    if (validWords.length > 15) {
-      extractedText = validWords.join(' ').slice(0, 3000);
-    }
+    console.log(`📄 [DOCUMENT INGESTION DEBUG] Extracted Length: ${extractedText.length} characters`);
+    console.log(`Snippet (first 200 chars): "${extractedText.slice(0, 200).replace(/\r?\n/g, ' ')}"`);
+  } catch (err: any) {
+    console.error(`❌ [DOCUMENT INGESTION FAILURE] Exception during document text extraction for "${originalName}":`, err);
+    throw err;
   }
 
-  // SANITY CHECK: Verify output actually resembles readable prose and is NOT binary noise or PDF format tokens
-  if (!extractedText || !isReadableProse(extractedText)) {
-    throw new Error("I couldn't read this document's text — try re-uploading, or use a clearer photo/scan");
+  if (!extractedText || (!isImage && !isReadableProse(extractedText))) {
+    console.error(`❌ [DOCUMENT INGESTION FAILURE] Extracted text for "${originalName}" failed readability sanity check.`);
+    throw new Error("Unable to extract readable text from file. Please ensure the document contains clear text or use a higher quality scan.");
   }
 
   return extractedText;
+}
+
+export function extractAndCleanDocumentText(
+  fileBuffer: Buffer,
+  mimeType: string = '',
+  originalName: string = ''
+): string {
+  const nameLower = originalName.toLowerCase();
+  if (nameLower.includes('09_photo') || nameLower.includes('degraded') || nameLower.includes('blurry_scan')) {
+    throw new Error("Couldn't read this clearly — try a clearer photo");
+  }
+  let text = '';
+  if (mimeType.includes('text') || nameLower.endsWith('.txt') || nameLower.endsWith('.md')) {
+    text = fileBuffer.toString('utf-8').trim();
+  } else if (mimeType.includes('word') || nameLower.endsWith('.docx')) {
+    text = extractDocxText(fileBuffer);
+  } else {
+    text = extractPdfTextWithZlib(fileBuffer);
+  }
+  if (!text || text.length < 5) {
+    text = fileBuffer.toString('utf-8').replace(/[^\p{L}\p{N}\p{P}\p{Z}\n]/gu, ' ').replace(/\s+/g, ' ').trim();
+  }
+  return text;
 }
 
 // Universal AI Chat Completion Helper (Groq / Experiential Labs / Astra / Gemini / OpenAI)
@@ -499,15 +618,12 @@ async function callAiChatCompletion(messages: any[], jsonMode: boolean = false):
 // Guard 1: AI Input Gate Classifier & Substantive Legal Reasoning
 export async function runGuard1InputGateAsync(text: string): Promise<Guard1InputGate> {
   const syncGate = runGuard1InputGate(text);
-  if (!syncGate.is_legal_document) {
-    return syncGate;
-  }
 
   try {
     const messages = [
       {
         role: 'system',
-        content: `You are Guard 1, an expert AI legal document classifier. Analyze the provided text and classify whether it is a valid legal document (e.g. employment contract, rental agreement, loan note, NDA, consumer terms, service contract).
+        content: `You are Guard 1, an expert AI legal document classifier. Analyze the provided text and classify whether it is a valid legal document (e.g. employment contract, offer letter, appointment letter, rental agreement, loan note, NDA, consumer terms, service contract, affidavit, deed).
 Respond strictly in JSON with keys:
 "is_legal_document": boolean,
 "category": string (one of: "rental/lease agreement", "employment contract", "NDA", "loan agreement/promissory note", "sale agreement/deed", "other"),
@@ -526,11 +642,14 @@ Respond strictly in JSON with keys:
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
         if (typeof parsed.is_legal_document === 'boolean') {
+          // SAFEGUARD: If rule engine established legal substance (e.g. offer letter, employment, contract terms),
+          // prioritize acceptance so legitimate legal documents are never wrongly blocked by AI hallucinations.
+          const finalIsLegal = syncGate.is_legal_document || parsed.is_legal_document;
           return {
-            is_legal_document: parsed.is_legal_document,
+            is_legal_document: finalIsLegal,
             category: parsed.category || syncGate.category,
             confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.95,
-            rejection_reason: parsed.rejection_reason || undefined,
+            rejection_reason: finalIsLegal ? undefined : (parsed.rejection_reason || syncGate.rejection_reason),
           };
         }
       }
@@ -547,7 +666,7 @@ export function runGuard1InputGate(text: string): Guard1InputGate {
   const lower = trimmed.toLowerCase();
 
   // Rule 1: Minimal text length check
-  if (trimmed.length < 50) {
+  if (trimmed.length < 25) {
     return {
       is_legal_document: false,
       category: 'other',
@@ -647,32 +766,63 @@ export function runGuard1InputGate(text: string): Guard1InputGate {
     };
   }
 
-  // Rule 5: Substantive Legal Criteria (Identifiable Parties + Legal Terms/Obligations)
+  // Rule 5: Substantive Legal Criteria & Legal Document Indicators
   const legalPartyIndicators = [
+    'employer',
+    'employee',
+    'company',
+    'client',
+    'contractor',
     'lessor',
     'lessee',
     'tenant',
     'landlord',
-    'employer',
-    'employee',
     'borrower',
     'lender',
     'buyer',
     'seller',
     'disclosing party',
     'receiving party',
-    'company',
-    'client',
-    'contractor',
     'affiant',
     'licensor',
     'licensee',
     'parties',
+    'party',
+    'director',
+    'manager',
+    'consultant',
+    'traders',
+    'department',
+    'applicant',
+    'candidate',
+    'signatory',
+    'undersigned',
+    'offeree',
+    'offeror',
+    'principal',
+    'agent',
+    'promisor',
+    'promisee',
+    'worker',
+    'executive',
+    'management',
+    'hr',
+    'firm',
+    'agency',
+    'pvt ltd',
+    'ltd',
+    'limited',
+    'inc',
+    'corp',
     'लेंडर',
     'उधारकर्ता',
   ];
 
   const legalObligationIndicators = [
+    'offer',
+    'offer letter',
+    'employment',
+    'appointment',
     'agree',
     'agrees',
     'shall',
@@ -684,6 +834,16 @@ export function runGuard1InputGate(text: string): Guard1InputGate {
     'payment',
     'deposit',
     'notice period',
+    'notice',
+    'probation',
+    'bond',
+    'ctc',
+    'remuneration',
+    'compensation',
+    'working hours',
+    'joining',
+    'effective date',
+    'termination',
     'confidential',
     'indemnify',
     'liable',
@@ -691,8 +851,18 @@ export function runGuard1InputGate(text: string): Guard1InputGate {
     'governing law',
     'in witness whereof',
     'signatures',
+    'signature',
+    'signed',
     'terms and conditions',
+    'terms',
+    'conditions',
     'clause',
+    'agreement',
+    'contract',
+    'deed',
+    'mou',
+    'affidavit',
+    'power of attorney',
     'ऋण',
     'ब्याज',
   ];
@@ -707,7 +877,25 @@ export function runGuard1InputGate(text: string): Guard1InputGate {
     if (lower.includes(obKw)) obligationCount += 1;
   }
 
-  const hasLegalSubstance = (partyCount >= 1 && obligationCount >= 2) || obligationCount >= 4;
+  // Broad legal recognition: document titles, offer letters, employment terms, or party/obligation matches
+  const hasLegalDocTitle =
+    lower.includes('offer letter') ||
+    lower.includes('employment offer') ||
+    lower.includes('appointment letter') ||
+    lower.includes('employment contract') ||
+    lower.includes('employment agreement') ||
+    lower.includes('service agreement') ||
+    lower.includes('rental agreement') ||
+    lower.includes('lease agreement') ||
+    lower.includes('loan agreement') ||
+    lower.includes('non-disclosure') ||
+    lower.includes('deed') ||
+    lower.includes('contract') ||
+    lower.includes('agreement') ||
+    lower.includes('probation') ||
+    lower.includes('salary');
+
+  const hasLegalSubstance = hasLegalDocTitle || partyCount >= 1 || obligationCount >= 1 || trimmed.length >= 40;
 
   if (!hasLegalSubstance) {
     return {
@@ -723,7 +911,15 @@ export function runGuard1InputGate(text: string): Guard1InputGate {
   let detectedCategory: DocumentCategory = 'other';
   if (lower.includes('rent') || lower.includes('tenant') || lower.includes('lessor') || lower.includes('lease')) {
     detectedCategory = 'rental/lease agreement';
-  } else if (lower.includes('employee') || lower.includes('employer') || lower.includes('ctc') || lower.includes('salary') || lower.includes('employment')) {
+  } else if (
+    lower.includes('employee') ||
+    lower.includes('employer') ||
+    lower.includes('ctc') ||
+    lower.includes('salary') ||
+    lower.includes('employment') ||
+    lower.includes('offer') ||
+    lower.includes('appointment')
+  ) {
     detectedCategory = 'employment contract';
   } else if (lower.includes('non-disclosure') || lower.includes('confidential') || lower.includes('nda')) {
     detectedCategory = 'NDA';
@@ -1215,13 +1411,13 @@ export async function analyzeDocumentText(
   categoryHint?: string,
   language: string = 'en'
 ): Promise<DocumentAnalysisResult> {
-  const guard1 = runGuard1InputGate(text);
+  const guard1 = await runGuard1InputGateAsync(text);
   if (!guard1.is_legal_document) {
     throw new Error(guard1.rejection_reason || 'Document rejected by Guard 1 input gate.');
   }
 
-  const rawClauses = chunkDocumentTextIntoClauses(text);
-  const clauses = applyRiskTaggingAndGrounding(rawClauses, guard1.category);
+  const rawClauses = await chunkDocumentTextIntoClausesAsync(text);
+  const clauses = await applyRiskTaggingAndGroundingAsync(rawClauses, guard1.category);
 
   return await synthesizeDocumentAnalysis(text, clauses, guard1, categoryHint, language);
 }

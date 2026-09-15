@@ -12,6 +12,7 @@ import {
   compareTwoDocuments,
   answerDocumentQuestion,
   extractAndCleanDocumentText,
+  extractAndCleanDocumentTextAsync,
   runGuard1InputGate,
   runGuard1InputGateAsync,
   chunkDocumentTextIntoClauses,
@@ -119,11 +120,11 @@ app.post('/api/analyze', upload.single('file'), async (req: Request, res: Respon
       // Extract text from file payload if present before Guard 1
       if (!documentText || documentText.trim().length < 5) {
         if (req.file) {
-          documentText = extractAndCleanDocumentText(req.file.buffer, req.file.mimetype || '', req.file.originalname || '');
+          documentText = await extractAndCleanDocumentTextAsync(req.file.buffer, req.file.mimetype || '', req.file.originalname || '');
         } else if (req.body.fileData) {
           const base64Data = req.body.fileData.replace(/^data:.*?;base64,/, '');
           const fileBuffer = Buffer.from(base64Data, 'base64');
-          documentText = extractAndCleanDocumentText(fileBuffer, req.body.fileType || 'image/jpeg', req.body.fileName || 'uploaded_doc.jpg');
+          documentText = await extractAndCleanDocumentTextAsync(fileBuffer, req.body.fileType || 'image/jpeg', req.body.fileName || 'uploaded_doc.jpg');
         }
       }
 
@@ -146,12 +147,14 @@ app.post('/api/analyze', upload.single('file'), async (req: Request, res: Respon
       // Stage 1: OCR & Parsing (Real Content Extraction)
       await sendEvent('progress', { stage: 'ocr_parsing', stageIndex: 1, status: 'in_progress', label: 'OCR & Parsing' });
       const t1 = Date.now();
-      if (req.file) {
-        documentText = extractAndCleanDocumentText(req.file.buffer, req.file.mimetype || '', req.file.originalname || '');
-      } else if (req.body.fileData) {
-        const base64Data = req.body.fileData.replace(/^data:.*?;base64,/, '');
-        const fileBuffer = Buffer.from(base64Data, 'base64');
-        documentText = extractAndCleanDocumentText(fileBuffer, req.body.fileType || 'image/jpeg', req.body.fileName || 'uploaded_doc.jpg');
+      if (!documentText || documentText.trim().length < 5) {
+        if (req.file) {
+          documentText = await extractAndCleanDocumentTextAsync(req.file.buffer, req.file.mimetype || '', req.file.originalname || '');
+        } else if (req.body.fileData) {
+          const base64Data = req.body.fileData.replace(/^data:.*?;base64,/, '');
+          const fileBuffer = Buffer.from(base64Data, 'base64');
+          documentText = await extractAndCleanDocumentTextAsync(fileBuffer, req.body.fileType || 'image/jpeg', req.body.fileName || 'uploaded_doc.jpg');
+        }
       }
 
       if (!documentText || documentText.trim().length < 10) {

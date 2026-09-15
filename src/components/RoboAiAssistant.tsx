@@ -71,6 +71,17 @@ export const RoboAiAssistant: React.FC<RoboAiAssistantProps> = ({
     } else {
       setInternalIsOpen(openState);
     }
+
+    if (openState) {
+      setTimeout(() => {
+        if (typeof window !== 'undefined') {
+          const chatElem = window.document.getElementById('legal-chat-container') || window.document.getElementById('robo-assistant-container');
+          if (chatElem) {
+            chatElem.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        }
+      }, 120);
+    }
   };
 
   // Restore active session ID
@@ -403,7 +414,10 @@ export const RoboAiAssistant: React.FC<RoboAiAssistantProps> = ({
 
   // If open: Render Embedded Chat Screen with Fixed Height, History & Clean Controls
   return (
-    <div className="bg-[#FBF8F1] border-2 border-[#E7E1D3] rounded-2xl shadow-md overflow-hidden flex flex-col h-[500px] lg:h-full lg:absolute lg:inset-0 animate-chat-popin relative">
+    <div
+      id="robo-assistant-container"
+      className="bg-[#FBF8F1] border-2 border-[#E7E1D3] rounded-2xl shadow-md overflow-hidden flex flex-col h-[500px] lg:h-full lg:absolute lg:inset-0 animate-chat-popin relative scroll-mt-6"
+    >
       {/* Header Bar */}
       <div className="bg-gradient-to-r from-[#F6F1E7] via-[#FBF8F1] to-[#F6F1E7] px-4 py-3 border-b border-[#E7E1D3] flex items-center justify-between shrink-0 relative">
         <div className="flex items-center space-x-3">
@@ -499,7 +513,7 @@ export const RoboAiAssistant: React.FC<RoboAiAssistantProps> = ({
                     </div>
                     <button
                       onClick={(e) => handleDeleteHistorySession(sess.id, e)}
-                      className="p-1 rounded hover:bg-[#FFF5F5] text-[#6E6659] hover:text-[#991B1B] transition-colors shrink-0"
+                      className="p-1 rounded hover:bg-[#FFF5F5] text-[#6E6659] hover:text-[#991B1B] transition-colors shrink-0 cursor-pointer"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>

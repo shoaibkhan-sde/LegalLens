@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Navbar } from './components/Navbar';
-import { ApiKeyModal } from './components/ApiKeyModal';
+import { SettingsModal } from './components/SettingsModal';
 import { HeroHeader } from './components/HeroHeader';
 import { DocumentCapture } from './components/DocumentCapture';
 import { VisualProgress } from './components/VisualProgress';
@@ -40,13 +40,13 @@ function AppContent() {
     try {
       const saved = localStorage.getItem('legallens_is_chat_open');
       if (saved !== null) return JSON.parse(saved);
-    } catch {}
+    } catch { }
     return false;
   });
 
   const [pipelineProgress, setPipelineProgress] = useState<{
     activeStep: number;
-    stepStatuses: Array<'pending' | 'in_progress' | 'completed'>;
+    stepStatuses: Array<'pending' | 'in_progress' | 'completed' | 'failed'>;
     elapsedMs: Record<number, number>;
   }>({
     activeStep: 0,
@@ -58,8 +58,35 @@ function AppContent() {
     setIsChatOpen(open);
     try {
       localStorage.setItem('legallens_is_chat_open', JSON.stringify(open));
-    } catch {}
+    } catch { }
+
+    if (open) {
+      setTimeout(() => {
+        const chatElem = document.getElementById('legal-chat-container') || document.getElementById('robo-assistant-container');
+        if (chatElem) {
+          chatElem.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 120);
+    }
   };
+
+  const getBaseStickyTop = () => {
+    if (typeof window === 'undefined') return 168;
+    const w = window.innerWidth;
+    if (w < 640) return 204; // Mobile screens (<640px)
+    if (w < 1024) return 184; // Tablet screens (640px - 1023px)
+    return 168; // Desktop screens (1024px+)
+  };
+
+  const [baseStickyTop, setBaseStickyTop] = useState(getBaseStickyTop());
+
+  useEffect(() => {
+    const handleResize = () => {
+      setBaseStickyTop(getBaseStickyTop());
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   useEffect(() => {
     ApiClient.getConfigStatus().then((status) => setConfigStatus(status));
@@ -85,6 +112,19 @@ function AppContent() {
       }
     }
   }, []);
+
+  useEffect(() => {
+    if (errorMessage) {
+      setTimeout(() => {
+        const errorBanner = document.getElementById('guard-error-banner');
+        if (errorBanner) {
+          errorBanner.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else {
+          window.scrollTo({ top: 120, behavior: 'smooth' });
+        }
+      }, 120);
+    }
+  }, [errorMessage]);
 
   const handlePrefetchTab = (tab: 'compare' | 'legal_aid') => {
     const assetsToLoad =
@@ -131,21 +171,62 @@ function AppContent() {
       });
       setDocumentAnalysis(result);
     } catch (err: any) {
-      setErrorMessage(err.message || 'System is busy, please try again in a moment.');
+      const msg = err.message || 'System is busy, please try again in a moment.';
+      setErrorMessage(msg);
+
+      // Mark the active step as failed so VisualProgress stays visible and highlights the failed step!
+      setPipelineProgress((prev) => {
+        const nextStatuses = [...prev.stepStatuses];
+        const failedIdx = prev.activeStep >= 0 && prev.activeStep < 5 ? prev.activeStep : 0;
+        nextStatuses[failedIdx] = 'failed';
+        return {
+          ...prev,
+          stepStatuses: nextStatuses,
+        };
+      });
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleVerifyInDocument = (clauseId: string) => {
+  const handleVerifyInDocument = (clauseId: string, clauseIndex?: number) => {
     setHighlightedClauseId(clauseId);
+
+    setTimeout(() => {
+      const clausesList = documentAnalysis?.clauses || [];
+      const idx = clauseIndex !== undefined && clauseIndex >= 0
+        ? clauseIndex
+        : clausesList.findIndex((c) => c.id === clauseId);
+
+      if (idx === -1) return;
+
+      const wrapper = document.querySelector('.cards-wrapper') as HTMLElement;
+      if (wrapper) {
+        const cards = Array.from(wrapper.children) as HTMLElement[];
+        let unstackedOffsetTop = 0;
+        for (let i = 0; i < idx && i < cards.length; i++) {
+          unstackedOffsetTop += cards[i].offsetHeight + 16;
+        }
+
+        const wrapperAbsoluteTop = wrapper.getBoundingClientRect().top + window.scrollY;
+        const baseStickyTop = getBaseStickyTop();
+        const targetStickyTop = baseStickyTop + (idx % 10) * 44;
+        const targetY = wrapperAbsoluteTop + unstackedOffsetTop - targetStickyTop;
+
+        window.scrollTo({
+          top: Math.max(0, targetY),
+          behavior: 'smooth',
+        });
+      }
+    }, 20);
+
     setTimeout(() => {
       setHighlightedClauseId(null);
     }, 4000);
   };
 
   return (
-    <div className="min-h-screen bg-[#F6F1E7] text-[#1E1B17] flex flex-col font-sans selection:bg-[#B85C38]/20 selection:text-[#B85C38] overflow-x-hidden">
+    <div className="min-h-screen bg-[#F6F1E7] text-[#1E1B17] flex flex-col font-sans selection:bg-[#B85C38]/20 selection:text-[#B85C38]">
       {/* Navigation Header */}
       <Navbar
         readingLevel={readingLevel}
@@ -165,16 +246,26 @@ function AppContent() {
             {/* Split Hero Section with Editorial Illustration */}
             <HeroHeader />
 
-            {/* Error Message Banner */}
+            {/* Error Message Banner (Auto-scrolled into view when Guard 1 triggers) */}
             {errorMessage && (
-              <div className="bg-[#FFF5F5] border border-[#FCA5A5] rounded-xl p-4 flex items-center justify-between text-xs text-[#991B1B] shadow-xs animate-fade-in-up">
-                <div className="flex items-center space-x-2">
-                  <AlertOctagon className="w-4 h-4 text-[#B85C38] shrink-0" />
-                  <span className="font-semibold">{errorMessage}</span>
+              <div
+                id="guard-error-banner"
+                className="bg-[#FFF5F5] border-2 border-[#FCA5A5] rounded-2xl p-4 flex items-center justify-between text-xs text-[#991B1B] shadow-md animate-fade-in-up scroll-mt-28 ring-4 ring-[#991B1B]/15"
+              >
+                <div className="flex items-center space-x-3">
+                  <div className="w-9 h-9 rounded-xl bg-[#991B1B]/10 flex items-center justify-center shrink-0 border border-[#991B1B]/20">
+                    <AlertOctagon className="w-5 h-5 text-[#991B1B]" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-[11px] uppercase tracking-wider text-[#991B1B]">
+                      Guard 1 Safety & Format Alert
+                    </div>
+                    <span className="font-semibold text-xs text-[#7F1D1D] mt-0.5 block">{errorMessage}</span>
+                  </div>
                 </div>
                 <button
                   onClick={() => setErrorMessage(null)}
-                  className="p-1 rounded hover:bg-[#FCA5A5]/30 text-[#991B1B] font-bold text-sm transition-colors cursor-pointer"
+                  className="p-1.5 rounded-lg hover:bg-[#FCA5A5]/40 text-[#991B1B] font-bold text-sm transition-colors cursor-pointer shrink-0"
                   title="Dismiss message"
                 >
                   ✕
@@ -208,7 +299,10 @@ function AppContent() {
 
               {/* Chat Screen Area (Takes equal 50% width area alongside uploader when open) */}
               {isChatOpen && (
-                <div className="lg:col-span-6 transition-all duration-300 animate-fade-in-up relative min-h-[500px] lg:min-h-0">
+                <div
+                  id="legal-chat-container"
+                  className="lg:col-span-6 transition-all duration-300 animate-fade-in-up relative min-h-[500px] lg:min-h-0 scroll-mt-6"
+                >
                   <RoboAiAssistant
                     document={documentAnalysis}
                     inputContext={activeInputContext}
@@ -220,12 +314,13 @@ function AppContent() {
               )}
             </div>
 
-            {/* Visual Loading Progress Bar */}
-            {isLoading && (
+            {/* Visual Loading Progress Bar (Stays visible during loading OR when a pipeline step has failed) */}
+            {(isLoading || pipelineProgress.stepStatuses.some((s) => s === 'failed')) && (
               <VisualProgress
                 activeStepIndex={pipelineProgress.activeStep}
                 stepStatuses={pipelineProgress.stepStatuses}
                 elapsedMs={pipelineProgress.elapsedMs}
+                errorMessage={errorMessage}
               />
             )}
 
@@ -254,11 +349,10 @@ function AppContent() {
                     <div className="flex items-center space-x-2 bg-[#F6F1E7] px-3.5 py-1.5 rounded-lg border border-[#E7E1D3]">
                       <span className="text-xs font-medium text-[#6E6659]">Risk Assessment:</span>
                       <span
-                        className={`text-xs font-bold px-2.5 py-0.5 rounded flex items-center space-x-1 ${
-                          documentAnalysis.overall_risk_score > 60
-                            ? 'bg-[#FFF5F5] text-[#991B1B] border border-[#FCA5A5]'
-                            : 'bg-[#ECFDF5] text-[#065F46] border border-[#6EE7B7]'
-                        }`}
+                        className={`text-xs font-bold px-2.5 py-0.5 rounded flex items-center space-x-1 ${documentAnalysis.overall_risk_score > 60
+                          ? 'bg-[#FFF5F5] text-[#991B1B] border border-[#FCA5A5]'
+                          : 'bg-[#ECFDF5] text-[#065F46] border border-[#6EE7B7]'
+                          }`}
                       >
                         <AlertOctagon className="w-3.5 h-3.5 mr-1" />
                         <span>
@@ -279,8 +373,11 @@ function AppContent() {
                 {/* Responsive Multi-Pane Grid Layout */}
                 {/* Desktop: 2-Column Multi-pane workspace | Mobile: Stacked 1-thing-at-a-time */}
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                  {/* Left Column: Original Document Viewer with Tap-to-Verify */}
-                  <div className="lg:col-span-5 h-full">
+                  {/* Left Column: Sticky Original Document Viewer with Tap-to-Verify */}
+                  <div
+                    className="lg:col-span-5 lg:sticky self-start h-[440px] transition-all duration-300"
+                    style={{ top: `${baseStickyTop}px` }}
+                  >
                     <DocumentViewer
                       documentTitle={documentAnalysis.document_title}
                       category={documentAnalysis.category}
@@ -290,52 +387,81 @@ function AppContent() {
                     />
                   </div>
 
-                  {/* Right Column: Simplified Clauses Cards List */}
+                  {/* Right Column: Sticky Stacking Clauses Cards Deck */}
                   <div className="lg:col-span-7 space-y-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#E7E1D3] pb-3">
-                      <h3 className="text-sm font-bold font-heading text-[#1E1B17] flex items-center space-x-2">
-                        <Layers className="w-4 h-4 text-[#B85C38]" />
-                        <span>Extracted Clauses & Risk Tagging ({(documentAnalysis.clauses || []).length})</span>
-                      </h3>
+                    {/* Sticky Control & Quick Jump Deck Bar */}
+                    <div className="sticky top-14 sm:top-16 z-30 bg-[#FBF8F1]/95 backdrop-blur-md px-4 py-3 border-2 border-[#E7E1D3] rounded-[24px] shadow-md space-y-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h3 className="text-sm font-extrabold font-heading text-[#1E1B17] flex items-center space-x-2">
+                          <Layers className="w-4 h-4 text-[#B85C38]" />
+                          <span>Extracted Clauses & Risk Tagging ({(documentAnalysis.clauses || []).length})</span>
+                        </h3>
 
-                      {/* Contextual Reading-Level Switcher */}
-                      <div className="flex items-center bg-[#F6F1E7] p-1 rounded-lg border border-[#E7E1D3] shadow-2xs">
-                        <button
-                          onClick={() => setReadingLevel('simple')}
-                          title="Plain language explanation"
-                          className={`flex items-center space-x-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all duration-200 ${
-                            readingLevel === 'simple'
+                        {/* Contextual Reading-Level Switcher Capsule */}
+                        <div className="flex items-center bg-[#F6F1E7] p-1 rounded-full border border-[#E7E1D3] shadow-xs">
+                          <button
+                            onClick={() => setReadingLevel('simple')}
+                            title="Plain language explanation"
+                            className={`flex items-center space-x-1 px-3 py-1 rounded-full text-xs font-bold transition-all duration-200 ${readingLevel === 'simple'
                               ? 'bg-[#FBF8F1] text-[#1E1B17] shadow-xs border border-[#E7E1D3]'
                               : 'text-[#6E6659] hover:text-[#1E1B17]'
-                          }`}
-                        >
-                          <Zap className="w-3.5 h-3.5 text-[#B85C38]" />
-                          <span>Simple</span>
-                        </button>
-                        <button
-                          onClick={() => setReadingLevel('very_simple')}
-                          title="Ultra-simple plain everyday language"
-                          className={`flex items-center space-x-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all duration-200 ${
-                            readingLevel === 'very_simple'
+                              }`}
+                          >
+                            <Zap className="w-3.5 h-3.5 text-[#B85C38]" />
+                            <span>Simple</span>
+                          </button>
+                          <button
+                            onClick={() => setReadingLevel('very_simple')}
+                            title="Ultra-simple plain everyday language"
+                            className={`flex items-center space-x-1 px-3 py-1 rounded-full text-xs font-bold transition-all duration-200 ${readingLevel === 'very_simple'
                               ? 'bg-[#FBF8F1] text-[#1E1B17] shadow-xs border border-[#E7E1D3]'
                               : 'text-[#6E6659] hover:text-[#1E1B17]'
-                          }`}
-                        >
-                          <Sparkles className="w-3.5 h-3.5 text-[#B85C38]" />
-                          <span>Ultra Simple</span>
-                        </button>
+                              }`}
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-[#B85C38]" />
+                            <span>Ultra Simple</span>
+                          </button>
+                        </div>
                       </div>
+
+                      {/* Quick Deck Jump Bar for instant clause access */}
+                      {(documentAnalysis.clauses || []).length > 1 && (
+                        <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 no-scrollbar text-xs">
+                          <span className="text-[10px] font-bold text-[#6E6659] uppercase tracking-wider shrink-0 pr-1">Deck Jump:</span>
+                          {(documentAnalysis.clauses || []).map((c, i) => (
+                            <button
+                              key={`deck-jump-${c.id}`}
+                              onClick={() => handleVerifyInDocument(c.id, i)}
+                              className="px-2.5 py-1 rounded-full bg-[#F6F1E7] hover:bg-[#B85C38] hover:text-white border border-[#E7E1D3] text-[11px] font-semibold text-[#1E1B17] shrink-0 transition-colors cursor-pointer shadow-2xs active:scale-95"
+                            >
+                              #{i + 1} {c.clause_type}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
-                    <div className="space-y-4">
-                      {(documentAnalysis.clauses || []).map((clause) => (
-                        <ClauseCard
+                    {/* Cards Wrapper Runway for Sticky Deck Stacking (PromptWars Deck Style) */}
+                    <div className="cards-wrapper relative space-y-4 pb-0 min-h-[440px]">
+                      {(documentAnalysis.clauses || []).map((clause, idx) => (
+                        <div
                           key={clause.id}
-                          clause={clause}
-                          readingLevel={readingLevel}
-                          onVerifyInDocument={handleVerifyInDocument}
-                          onOpenShareModal={setSelectedShareClause}
-                        />
+                          id={`clause-card-${clause.id}`}
+                          className="sticky transition-all duration-300 scroll-mt-44 sm:scroll-mt-48"
+                          style={{
+                            top: `calc(${baseStickyTop}px + ${(idx % 10) * 44}px)`,
+                            zIndex: 10 + idx,
+                          }}
+                        >
+                          <ClauseCard
+                            clause={clause}
+                            index={idx}
+                            totalCards={(documentAnalysis.clauses || []).length}
+                            readingLevel={readingLevel}
+                            onVerifyInDocument={handleVerifyInDocument}
+                            onOpenShareModal={setSelectedShareClause}
+                          />
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -389,11 +515,9 @@ function AppContent() {
       <Footer onSelectTab={setActiveTab} />
 
       {/* Modals */}
-      <ApiKeyModal
+      <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
-        configStatus={configStatus}
-        onConfigUpdated={setConfigStatus}
       />
 
       <ExplainToFriendModal

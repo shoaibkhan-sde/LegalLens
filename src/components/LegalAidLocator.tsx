@@ -170,9 +170,8 @@ export const LegalAidLocator: React.FC = () => {
               onContextMenu={(e) => e.preventDefault()}
               onMouseDown={(e) => e.preventDefault()}
               onDoubleClick={(e) => e.preventDefault()}
-              className={`w-full h-auto max-w-xs sm:max-w-sm object-contain mx-auto select-none pointer-events-none transition-opacity duration-300 ${
-                isIllustrationLoaded ? 'opacity-100' : 'opacity-0'
-              }`}
+              className={`w-full h-auto max-w-xs sm:max-w-sm object-contain mx-auto select-none pointer-events-none transition-opacity duration-300 ${isIllustrationLoaded ? 'opacity-100' : 'opacity-0'
+                }`}
             />
           </div>
         </div>
@@ -221,9 +220,8 @@ export const LegalAidLocator: React.FC = () => {
               onContextMenu={(e) => e.preventDefault()}
               onMouseDown={(e) => e.preventDefault()}
               onDoubleClick={(e) => e.preventDefault()}
-              className={`w-24 h-24 object-contain mx-auto select-none pointer-events-none transition-opacity duration-300 ${
-                isEmptyStateLoaded ? 'opacity-100' : 'opacity-0'
-              }`}
+              className={`w-24 h-24 object-contain mx-auto select-none pointer-events-none transition-opacity duration-300 ${isEmptyStateLoaded ? 'opacity-100' : 'opacity-0'
+                }`}
             />
           </div>
           <div>
