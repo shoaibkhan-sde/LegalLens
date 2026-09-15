@@ -25,3 +25,9 @@ yarn-error.log*
 .idea/
 .DS_Store
 Thumbs.db
+
+# Demo & test media recordings
+legallens_demo*
+*.webp
+*.png
+*.mp4
