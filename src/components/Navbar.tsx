@@ -16,6 +16,7 @@ interface NavbarProps {
   onToggleReadingLevel: (level: 'simple' | 'very_simple') => void;
   activeTab: 'analyze' | 'compare' | 'legal_aid';
   onSelectTab: (tab: 'analyze' | 'compare' | 'legal_aid') => void;
+  onPrefetchTab?: (tab: 'compare' | 'legal_aid') => void;
   configStatus: ServerConfigStatus;
   onOpenSettings: () => void;
 }
@@ -23,6 +24,7 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   onSelectTab,
+  onPrefetchTab,
   configStatus,
   onOpenSettings,
 }) => {
@@ -71,6 +73,8 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             <button
               onClick={() => onSelectTab('compare')}
+              onMouseEnter={() => onPrefetchTab?.('compare')}
+              onFocus={() => onPrefetchTab?.('compare')}
               className={`flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 shrink-0 cursor-pointer ${
                 activeTab === 'compare'
                   ? 'bg-[#1E1B17] text-[#FBF8F1] font-bold shadow-xs'
@@ -84,6 +88,8 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             <button
               onClick={() => onSelectTab('legal_aid')}
+              onMouseEnter={() => onPrefetchTab?.('legal_aid')}
+              onFocus={() => onPrefetchTab?.('legal_aid')}
               className={`flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 shrink-0 cursor-pointer ${
                 activeTab === 'legal_aid'
                   ? 'bg-[#1E1B17] text-[#FBF8F1] font-bold shadow-xs'

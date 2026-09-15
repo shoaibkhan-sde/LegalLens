@@ -23,6 +23,8 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ currentDocument 
   const [comparisonResult, setComparisonResult] = useState<ComparisonResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isBannerLoaded, setIsBannerLoaded] = useState(false);
+  const [isEmptyStateLoaded, setIsEmptyStateLoaded] = useState(false);
 
   const hasDocA = Boolean(docAText.trim() || currentDocument);
   const hasDocB = Boolean(docBText.trim());
@@ -57,17 +59,25 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ currentDocument 
   return (
     <div className="space-y-6 animate-fade-in-up">
       {/* Editorial Compare Banner Illustration */}
-      <div className="w-full flex justify-center items-center">
+      <div className="w-full flex justify-center items-center relative h-[140px] sm:h-[160px] md:h-[180px] hidden min-[380px]:flex">
+        {!isBannerLoaded && (
+          <div className="absolute inset-0 bg-[#F6F1E7] border border-[#E7E1D3] rounded-2xl animate-pulse flex items-center justify-center text-xs text-[#A39E93]">
+            <Sparkles className="w-5 h-5 text-[#B85C38]/40 animate-pulse" />
+          </div>
+        )}
         <img
           src="/assets/compare-illustration.png"
           alt="Illustration of two documents being compared, connected by a scale motif"
-          loading="lazy"
+          loading="eager"
+          onLoad={() => setIsBannerLoaded(true)}
           draggable="false"
           onDragStart={(e) => e.preventDefault()}
           onContextMenu={(e) => e.preventDefault()}
           onMouseDown={(e) => e.preventDefault()}
           onDoubleClick={(e) => e.preventDefault()}
-          className="w-full h-auto max-h-[140px] sm:max-h-[160px] md:max-h-[180px] object-contain hidden min-[380px]:block mx-auto select-none pointer-events-none"
+          className={`w-full h-auto max-h-[140px] sm:max-h-[160px] md:max-h-[180px] object-contain mx-auto select-none pointer-events-none transition-opacity duration-300 ${
+            isBannerLoaded ? 'opacity-100' : 'opacity-0'
+          }`}
         />
       </div>
 
@@ -154,17 +164,25 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ currentDocument 
       {/* Initial Empty State before Comparison is Run */}
       {!comparisonResult && !isLoading && (
         <div className="bg-[#FBF8F1] border border-[#E7E1D3] rounded-2xl p-8 text-center space-y-3 shadow-xs">
-          <img
-            src="/assets/empty-state-illustration.png"
-            alt="Illustration of a magnifying glass examining a document"
-            loading="lazy"
-            draggable="false"
-            onDragStart={(e) => e.preventDefault()}
-            onContextMenu={(e) => e.preventDefault()}
-            onMouseDown={(e) => e.preventDefault()}
-            onDoubleClick={(e) => e.preventDefault()}
-            className="w-24 h-24 object-contain mx-auto select-none pointer-events-none"
-          />
+          <div className="relative w-24 h-24 mx-auto">
+            {!isEmptyStateLoaded && (
+              <div className="absolute inset-0 bg-[#F6F1E7] border border-[#E7E1D3] rounded-xl animate-pulse" />
+            )}
+            <img
+              src="/assets/empty-state-illustration.png"
+              alt="Illustration of a magnifying glass examining a document"
+              loading="eager"
+              onLoad={() => setIsEmptyStateLoaded(true)}
+              draggable="false"
+              onDragStart={(e) => e.preventDefault()}
+              onContextMenu={(e) => e.preventDefault()}
+              onMouseDown={(e) => e.preventDefault()}
+              onDoubleClick={(e) => e.preventDefault()}
+              className={`w-24 h-24 object-contain mx-auto select-none pointer-events-none transition-opacity duration-300 ${
+                isEmptyStateLoaded ? 'opacity-100' : 'opacity-0'
+              }`}
+            />
+          </div>
           <div>
             <h3 className="text-xs font-bold text-[#1E1B17]">{t('comparison.empty_title')}</h3>
             <p className="text-xs text-[#6E6659] mt-1 max-w-sm mx-auto">

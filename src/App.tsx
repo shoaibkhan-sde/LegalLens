@@ -63,7 +63,40 @@ function AppContent() {
 
   useEffect(() => {
     ApiClient.getConfigStatus().then((status) => setConfigStatus(status));
+
+    // Prefetch Compare & Legal Aid illustrations ahead of time in background
+    const prefetchAssets = () => {
+      const assets = [
+        '/assets/compare-illustration.png',
+        '/assets/legal-aid-illustration.png',
+        '/assets/empty-state-illustration.png',
+      ];
+      assets.forEach((src) => {
+        const img = new Image();
+        img.src = src;
+      });
+    };
+
+    if (typeof window !== 'undefined') {
+      if ('requestIdleCallback' in window) {
+        (window as any).requestIdleCallback(prefetchAssets);
+      } else {
+        setTimeout(prefetchAssets, 500);
+      }
+    }
   }, []);
+
+  const handlePrefetchTab = (tab: 'compare' | 'legal_aid') => {
+    const assetsToLoad =
+      tab === 'compare'
+        ? ['/assets/compare-illustration.png', '/assets/empty-state-illustration.png']
+        : ['/assets/legal-aid-illustration.png', '/assets/empty-state-illustration.png'];
+
+    assetsToLoad.forEach((src) => {
+      const img = new Image();
+      img.src = src;
+    });
+  };
 
   const handleAnalyzeText = async (text: string, file?: File) => {
     setIsLoading(true);
@@ -119,6 +152,7 @@ function AppContent() {
         onToggleReadingLevel={setReadingLevel}
         activeTab={activeTab}
         onSelectTab={setActiveTab}
+        onPrefetchTab={handlePrefetchTab}
         configStatus={configStatus}
         onOpenSettings={() => setIsSettingsOpen(true)}
       />
