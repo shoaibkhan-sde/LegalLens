@@ -24,6 +24,8 @@ import { QrCodeGenerator } from './QrCodeGenerator';
 import { ActiveInputContext } from '../types/schemas';
 import { ApiClient } from '../services/apiClient';
 import { useLanguage } from '../context/LanguageContext';
+import { PDFDocument } from 'pdf-lib';
+import { MAX_PDF_PAGES, MAX_PDF_PAGES_ERROR_MSG } from '../utils/constants';
 
 interface DocumentCaptureProps {
   onAnalyzeText: (text: string, file?: File) => void;
@@ -82,8 +84,24 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
       return;
     }
 
-    ApiClient.extractPreviewText(uploadedFile)
-      .then((res) => {
+    const processUploadedFile = async () => {
+      const isPdfFile = uploadedFile.type.includes('pdf') || uploadedFile.name.toLowerCase().endsWith('.pdf');
+      if (isPdfFile) {
+        try {
+          const arrayBuffer = await uploadedFile.arrayBuffer();
+          const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+          const pageCount = pdfDoc.getPageCount();
+          if (pageCount > MAX_PDF_PAGES) {
+            setExtractedFileText(MAX_PDF_PAGES_ERROR_MSG);
+            return;
+          }
+        } catch {
+          // If load fails on client, server authoritative check will handle it
+        }
+      }
+
+      try {
+        const res = await ApiClient.extractPreviewText(uploadedFile);
         if (res.text && res.text.trim().length > 10) {
           setExtractedFileText(res.text);
         } else {
@@ -91,12 +109,14 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
             res.error || "I couldn't read this document's text — try re-uploading, or use a clearer photo/scan"
           );
         }
-      })
-      .catch(() => {
+      } catch {
         setExtractedFileText(
           "I couldn't read this document's text — try re-uploading, or use a clearer photo/scan"
         );
-      });
+      }
+    };
+
+    processUploadedFile();
   }, [uploadedFile]);
 
   useEffect(() => {
@@ -237,7 +257,36 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
 
   const handleLoadSample = (sampleType: 'rental' | 'employment') => {
     if (sampleType === 'rental') {
-      const rentalText = `Residential Tenancy Agreement (Bengaluru, Karnataka)\nMade between Ramesh Sharma (Lessor) and Ankit Kumar (Lessee) for Flat 302 Indiranagar Bengaluru.\nMonthly rent: ₹25,000 payable on 5th. Deposit: ₹1,50,000 refundable within 45 days with 1 month rent painting deduction.\nLock-in: 6 months. Notice: 60 days written notice. Stamp paper: ₹100.`;
+      const rentalText = `RESIDENTIAL TENANCY AGREEMENT (BENGALURU, KARNATAKA)
+
+This Agreement is made on this 1st day of April 2026, by and between Mr. Ramesh Sharma (Lessor) and Mr. Ankit Kumar (Lessee).
+
+1. PREMISES & LEASE TERM
+The Lessor agrees to rent Flat 302, Green Acres Apartment, Indiranagar, Bengaluru to the Lessee for a period of 11 months starting 1st April 2026.
+
+2. RENT AND PAYMENT SCHEDULE
+The Monthly rent shall be Rs. 25,000 payable on or before the 5th of each calendar month. A late payment penalty of 5% per week shall apply after the 5th.
+
+3. SECURITY DEPOSIT & REFUND CONDITIONS
+The Lessee shall pay an interest-free Security Deposit of Rs. 1,50,000. The Security Deposit shall be returned to the Lessee after 45 days of vacating, subject to deduction of 1 month rent for painting and cleaning.
+
+4. LOCK-IN PERIOD AND EARLY TERMINATION
+There shall be a mandatory lock-in period of 6 months. If the Lessee vacates prior to completion of the lock-in period, the entire Security Deposit of Rs. 1,50,000 shall be forfeited as a penalty.
+
+5. MAINTENANCE AND UTILITY CHARGES
+The Lessee shall pay monthly society maintenance charges of Rs. 3,500 and all electricity/water bills directly to the respective authorities.
+
+6. USE OF PREMISES & SUBLETTING RESTRICTION
+The premises shall be used exclusively for residential purposes by the Lessee and immediate family. Subletting or commercial use is strictly prohibited.
+
+7. ALTERATIONS & PROPERTY FITTINGS
+The Lessee shall not make any structural alterations, paint walls, or drive heavy nails without prior written permission from the Lessor.
+
+8. LANDLORD ENTRY & INSPECTION RIGHTS
+The Lessor reserves the right to enter and inspect the premises with 24 hours prior notice during reasonable hours.
+
+9. INDEMNITY & DAMAGE LIABILITY
+The Lessee agrees to defend, indemnify, and hold harmless the Lessor against all legal claims, damages, or liabilities arising from Lessee's stay.`;
       onAnalyzeText(rentalText);
     } else {
       const empText = `Employment Offer & Service Agreement\nTechNova Solutions appoints Senior Frontend Engineer at Gurugram office. CTC: ₹12,00,000.\nService Bond: 24 months tenure requirement or ₹3,00,000 training reimbursement penalty.\nNon-compete: 24 months post-employment non-compete restriction. Notice: 90 days.`;

@@ -65,7 +65,7 @@ app.post('/api/config/key', (req: Request, res: Response) => {
 });
 
 // Fast Preview Extraction Endpoint (Unified single parsing pipeline for preview and chat)
-app.post('/api/extract-preview', upload.single('file'), (req: Request, res: Response) => {
+app.post('/api/extract-preview', upload.single('file'), async (req: Request, res: Response) => {
   try {
     if (!req.file) {
       const text = (req.body.text || '').trim();
@@ -77,7 +77,7 @@ app.post('/api/extract-preview', upload.single('file'), (req: Request, res: Resp
     const originalName = req.file.originalname || '';
 
     try {
-      const extracted = extractAndCleanDocumentText(fileBuffer, mimeType, originalName);
+      const extracted = await extractAndCleanDocumentTextAsync(fileBuffer, mimeType, originalName);
       res.json({ text: extracted });
     } catch (err: any) {
       res.json({
@@ -114,18 +114,18 @@ app.post('/api/analyze', upload.single('file'), async (req: Request, res: Respon
     };
 
     try {
-      let documentText = req.body.text || '';
+      let documentText = '';
       const language = req.body.language || 'en';
 
-      // Extract text from file payload if present before Guard 1
-      if (!documentText || documentText.trim().length < 5) {
-        if (req.file) {
-          documentText = await extractAndCleanDocumentTextAsync(req.file.buffer, req.file.mimetype || '', req.file.originalname || '');
-        } else if (req.body.fileData) {
-          const base64Data = req.body.fileData.replace(/^data:.*?;base64,/, '');
-          const fileBuffer = Buffer.from(base64Data, 'base64');
-          documentText = await extractAndCleanDocumentTextAsync(fileBuffer, req.body.fileType || 'image/jpeg', req.body.fileName || 'uploaded_doc.jpg');
-        }
+      // Always prioritize fresh extraction from uploaded file payload over client preview text
+      if (req.file) {
+        documentText = await extractAndCleanDocumentTextAsync(req.file.buffer, req.file.mimetype || '', req.file.originalname || '', language);
+      } else if (req.body.fileData) {
+        const base64Data = req.body.fileData.replace(/^data:.*?;base64,/, '');
+        const fileBuffer = Buffer.from(base64Data, 'base64');
+        documentText = await extractAndCleanDocumentTextAsync(fileBuffer, req.body.fileType || 'image/jpeg', req.body.fileName || 'uploaded_doc.jpg', language);
+      } else {
+        documentText = req.body.text || '';
       }
 
       // Stage 0: Guard 1 Check (Real AI Classification Inference)
@@ -149,11 +149,11 @@ app.post('/api/analyze', upload.single('file'), async (req: Request, res: Respon
       const t1 = Date.now();
       if (!documentText || documentText.trim().length < 5) {
         if (req.file) {
-          documentText = await extractAndCleanDocumentTextAsync(req.file.buffer, req.file.mimetype || '', req.file.originalname || '');
+          documentText = await extractAndCleanDocumentTextAsync(req.file.buffer, req.file.mimetype || '', req.file.originalname || '', language);
         } else if (req.body.fileData) {
           const base64Data = req.body.fileData.replace(/^data:.*?;base64,/, '');
           const fileBuffer = Buffer.from(base64Data, 'base64');
-          documentText = await extractAndCleanDocumentTextAsync(fileBuffer, req.body.fileType || 'image/jpeg', req.body.fileName || 'uploaded_doc.jpg');
+          documentText = await extractAndCleanDocumentTextAsync(fileBuffer, req.body.fileType || 'image/jpeg', req.body.fileName || 'uploaded_doc.jpg', language);
         }
       }
 
@@ -208,7 +208,7 @@ app.post('/api/analyze', upload.single('file'), async (req: Request, res: Respon
   try {
     let documentText = req.body.text || '';
     if (req.file) {
-      documentText = extractAndCleanDocumentText(req.file.buffer, req.file.mimetype || '', req.file.originalname || '');
+      documentText = await extractAndCleanDocumentTextAsync(req.file.buffer, req.file.mimetype || '', req.file.originalname || '');
     }
     if (!documentText || documentText.trim().length < 10) {
       res.status(400).json({ error: 'Document content or file is required.' });

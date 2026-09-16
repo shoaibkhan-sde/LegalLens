@@ -1,6 +1,8 @@
 import React, { useEffect, useRef } from 'react';
 import { FileText, CheckCircle2 } from 'lucide-react';
 import { SimplifiedClause } from '../types/schemas';
+import { getRiskStyle } from '../utils/risk';
+import { useLanguage } from '../context/LanguageContext';
 
 interface DocumentViewerProps {
   documentTitle: string;
@@ -10,21 +12,6 @@ interface DocumentViewerProps {
   onClauseSelect?: (clauseId: string, index?: number) => void;
 }
 
-const itemColorStyles = [
-  { border: 'border-[#BE123C]', badgeBg: 'bg-[#E11D48] text-white', text: 'text-[#BE123C]', bg: 'bg-[#FFF1F2]' }, // Crimson
-  { border: 'border-[#0369A1]', badgeBg: 'bg-[#0284C7] text-white', text: 'text-[#0369A1]', bg: 'bg-[#F0F9FF]' }, // Sky
-  { border: 'border-[#B45309]', badgeBg: 'bg-[#D97706] text-white', text: 'text-[#B45309]', bg: 'bg-[#FFFBEB]' }, // Amber
-  { border: 'border-[#047857]', badgeBg: 'bg-[#059669] text-white', text: 'text-[#047857]', bg: 'bg-[#ECFDF5]' }, // Emerald
-  { border: 'border-[#6D28D9]', badgeBg: 'bg-[#7C3AED] text-white', text: 'text-[#6D28D9]', bg: 'bg-[#F5F3FF]' }, // Violet
-  { border: 'border-[#9E4B2B]', badgeBg: 'bg-[#B85C38] text-white', text: 'text-[#9E4B2B]', bg: 'bg-[#FDF4F0]' }, // Terracotta
-  { border: 'border-[#E11D48]', badgeBg: 'bg-[#F43F5E] text-white', text: 'text-[#E11D48]', bg: 'bg-[#FFF1F2]' }, // Rose
-  { border: 'border-[#0F766E]', badgeBg: 'bg-[#0D9488] text-white', text: 'text-[#0F766E]', bg: 'bg-[#F0FDFA]' }, // Teal
-  { border: 'border-[#4338CA]', badgeBg: 'bg-[#4F46E5] text-white', text: 'text-[#4338CA]', bg: 'bg-[#EEF2FF]' }, // Indigo
-  { border: 'border-[#C2410C]', badgeBg: 'bg-[#EA580C] text-white', text: 'text-[#C2410C]', bg: 'bg-[#FFF7ED]' }, // Orange
-  { border: 'border-[#0E7490]', badgeBg: 'bg-[#0891B2] text-white', text: 'text-[#0E7490]', bg: 'bg-[#ECFEFF]' }, // Cyan
-  { border: 'border-[#7E22CE]', badgeBg: 'bg-[#9333EA] text-white', text: 'text-[#7E22CE]', bg: 'bg-[#FAF5FF]' }, // Purple
-];
-
 export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   documentTitle,
   category,
@@ -32,12 +19,23 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   highlightedClauseId,
   onClauseSelect,
 }) => {
+  const { language } = useLanguage();
   const clauseRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (highlightedClauseId && clauseRefs.current[highlightedClauseId]) {
+    if (highlightedClauseId && clauseRefs.current[highlightedClauseId] && containerRef.current) {
       const el = clauseRefs.current[highlightedClauseId];
-      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const container = containerRef.current;
+      if (el) {
+        const elTop = el.offsetTop;
+        const elHeight = el.offsetHeight;
+        const containerHeight = container.clientHeight;
+        container.scrollTo({
+          top: Math.max(0, elTop - containerHeight / 2 + elHeight / 2),
+          behavior: 'smooth',
+        });
+      }
     }
   }, [highlightedClauseId]);
 
@@ -67,11 +65,12 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         </div>
       </div>
 
-      {/* Synchronized Document Clauses Scrollable Deck View */}
-      <div className="flex-1 overflow-y-auto space-y-3 pr-1 text-xs font-mono leading-relaxed text-[#1E1B17] custom-scrollbar">
+      {/* Synchronized Document Clauses Scrollable View */}
+      <div ref={containerRef} className="flex-1 overflow-y-auto p-2 space-y-3 text-xs font-mono leading-relaxed text-[#1E1B17] custom-scrollbar">
         {(clauses || []).map((c, idx) => {
           const isHighlighted = highlightedClauseId === c.id;
-          const colorTheme = itemColorStyles[idx % itemColorStyles.length];
+          const riskStyle = getRiskStyle(c.risk_level, language);
+          const RiskIcon = riskStyle.icon;
 
           return (
             <div
@@ -80,20 +79,34 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                 clauseRefs.current[c.id] = el;
               }}
               onClick={() => onClauseSelect?.(c.id, idx)}
-              className={`p-3.5 rounded-xl border-2 transition-all duration-200 cursor-pointer ${
+              className={`p-3.5 rounded-xl border-2 transition-all duration-200 cursor-pointer bg-[#FBF8F1] my-0.5 ${
                 isHighlighted
-                  ? 'bg-[#B85C38]/15 border-[#B85C38] text-[#1E1B17] ring-2 ring-[#B85C38]/30 shadow-md scale-[1.01]'
-                  : `${colorTheme.bg} ${colorTheme.border} hover:shadow-md hover:scale-[1.005]`
+                  ? 'border-[#B85C38] ring-1 ring-[#B85C38]/40 shadow-md scale-[1.002]'
+                  : 'border-[#E7E1D3] hover:border-[#B85C38]/40 hover:shadow-xs'
               }`}
             >
               <div className="flex items-center justify-between mb-2 font-sans font-extrabold text-xs">
                 <div className="flex items-center space-x-2 min-w-0">
-                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-black ${colorTheme.badgeBg} shrink-0`}>
+                  <span
+                    className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-black shrink-0 ${
+                      isHighlighted
+                        ? 'bg-[#B85C38] text-white'
+                        : 'bg-[#E7E1D3] text-[#1E1B17]'
+                    }`}
+                  >
                     #{idx + 1}
                   </span>
-                  <span className={`truncate ${colorTheme.text}`}>
+                  <span className="truncate text-[#1E1B17] font-bold">
                     {c.title}
                   </span>
+                </div>
+
+                {/* Same Risk Pill as ClauseCard */}
+                <div
+                  className={`flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold border shadow-2xs shrink-0 ${riskStyle.badgeBg}`}
+                >
+                  <RiskIcon className="w-3 h-3 shrink-0" />
+                  <span>{riskStyle.label}</span>
                 </div>
               </div>
 

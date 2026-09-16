@@ -1,0 +1,17 @@
+NON-DISCLOSURE AGREEMENT
+
+This Non-Disclosure Agreement ("Agreement") is entered into on 15th March 2026 between Vertex Analytics Pvt. Ltd., a company incorporated under the Companies Act, 2013, having its registered office at Whitefield, Bengaluru ("Disclosing Party"), and Mr. Aditya Rao ("Receiving Party").
+
+1. CONFIDENTIAL INFORMATION: The Receiving Party agrees to hold in strict confidence all technical, financial, and business information disclosed by the Disclosing Party in connection with a potential engagement, whether disclosed orally, in writing, or electronically.
+
+2. TERM: This Agreement shall remain in effect for a period of 3 (three) years from the date of signing, and the confidentiality obligations shall survive for an additional 2 (two) years after termination.
+
+3. EXCLUSIONS: Confidential Information shall not include information that is publicly available, independently developed, or lawfully obtained from a third party without breach of any confidentiality obligation.
+
+4. INDEMNITY: The Receiving Party shall indemnify the Disclosing Party against any losses arising from unauthorized disclosure or misuse of Confidential Information.
+
+5. NON-COMPETE: The Receiving Party agrees not to engage in any competing business using the Disclosing Party's Confidential Information for a period of 12 months following termination of discussions.
+
+6. GOVERNING LAW: This Agreement shall be governed by the laws of India, with courts at Bengaluru having exclusive jurisdiction.
+
+IN WITNESS WHEREOF, the parties hereto have executed this Agreement as of the date first written above.

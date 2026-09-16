@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Navbar } from './components/Navbar';
 import { SettingsModal } from './components/SettingsModal';
 import { HeroHeader } from './components/HeroHeader';
@@ -16,7 +16,7 @@ import { Footer } from './components/Footer';
 
 import { ApiClient } from './services/apiClient';
 import { DocumentAnalysisResult, SimplifiedClause, ServerConfigStatus, ActiveInputContext } from './types/schemas';
-import { ShieldCheck, Layers, AlertOctagon, Zap, Sparkles } from 'lucide-react';
+import { ShieldCheck, Layers, AlertOctagon, Zap, Sparkles, ChevronLeft, ChevronRight } from 'lucide-react';
 
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
 
@@ -35,6 +35,7 @@ function AppContent() {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [highlightedClauseId, setHighlightedClauseId] = useState<string | null>(null);
+  const [activeClauseId, setActiveClauseId] = useState<string | null>(null);
   const [selectedShareClause, setSelectedShareClause] = useState<SimplifiedClause | null>(null);
   const [isChatOpen, setIsChatOpen] = useState<boolean>(() => {
     try {
@@ -43,6 +44,30 @@ function AppContent() {
     } catch { }
     return false;
   });
+
+  const deckJumpContainerRef = useRef<HTMLDivElement | null>(null);
+  const deckJumpPillRefs = useRef<Record<number, HTMLButtonElement | null>>({});
+
+  useEffect(() => {
+    if (documentAnalysis?.clauses && documentAnalysis.clauses.length > 0) {
+      const clausesList = documentAnalysis.clauses;
+      const activeIndex = Math.max(
+        0,
+        clausesList.findIndex((c) => c.id === (activeClauseId || highlightedClauseId))
+      );
+      const activePill = deckJumpPillRefs.current[activeIndex];
+      const container = deckJumpContainerRef.current;
+      if (activePill && container) {
+        const pillLeft = activePill.offsetLeft;
+        const pillWidth = activePill.offsetWidth;
+        const containerWidth = container.clientWidth;
+        container.scrollTo({
+          left: Math.max(0, pillLeft - containerWidth / 2 + pillWidth / 2),
+          behavior: 'smooth',
+        });
+      }
+    }
+  }, [activeClauseId, highlightedClauseId, documentAnalysis]);
 
   const [pipelineProgress, setPipelineProgress] = useState<{
     activeStep: number;
@@ -73,9 +98,8 @@ function AppContent() {
   const getBaseStickyTop = () => {
     if (typeof window === 'undefined') return 168;
     const w = window.innerWidth;
-    if (w < 640) return 204; // Mobile screens (<640px)
-    if (w < 1024) return 184; // Tablet screens (640px - 1023px)
-    return 168; // Desktop screens (1024px+)
+    if (w < 640) return 176;
+    return 168;
   };
 
   const [baseStickyTop, setBaseStickyTop] = useState(getBaseStickyTop());
@@ -142,6 +166,7 @@ function AppContent() {
     setIsLoading(true);
     setDocumentAnalysis(null);
     setErrorMessage(null);
+    setActiveClauseId(null);
     setPipelineProgress({
       activeStep: 0,
       stepStatuses: ['in_progress', 'pending', 'pending', 'pending', 'pending'],
@@ -170,6 +195,9 @@ function AppContent() {
         });
       });
       setDocumentAnalysis(result);
+      if (result.clauses && result.clauses.length > 0) {
+        setActiveClauseId(result.clauses[0].id);
+      }
     } catch (err: any) {
       const msg = err.message || 'System is busy, please try again in a moment.';
       setErrorMessage(msg);
@@ -189,40 +217,13 @@ function AppContent() {
     }
   };
 
-  const handleVerifyInDocument = (clauseId: string, clauseIndex?: number) => {
+  const handleVerifyInDocument = (clauseId: string, _clauseIndex?: number) => {
     setHighlightedClauseId(clauseId);
-
-    setTimeout(() => {
-      const clausesList = documentAnalysis?.clauses || [];
-      const idx = clauseIndex !== undefined && clauseIndex >= 0
-        ? clauseIndex
-        : clausesList.findIndex((c) => c.id === clauseId);
-
-      if (idx === -1) return;
-
-      const wrapper = document.querySelector('.cards-wrapper') as HTMLElement;
-      if (wrapper) {
-        const cards = Array.from(wrapper.children) as HTMLElement[];
-        let unstackedOffsetTop = 0;
-        for (let i = 0; i < idx && i < cards.length; i++) {
-          unstackedOffsetTop += cards[i].offsetHeight + 16;
-        }
-
-        const wrapperAbsoluteTop = wrapper.getBoundingClientRect().top + window.scrollY;
-        const baseStickyTop = getBaseStickyTop();
-        const targetStickyTop = baseStickyTop + (idx % 10) * 44;
-        const targetY = wrapperAbsoluteTop + unstackedOffsetTop - targetStickyTop;
-
-        window.scrollTo({
-          top: Math.max(0, targetY),
-          behavior: 'smooth',
-        });
-      }
-    }, 20);
+    setActiveClauseId(clauseId);
 
     setTimeout(() => {
       setHighlightedClauseId(null);
-    }, 4000);
+    }, 3500);
   };
 
   return (
@@ -333,7 +334,7 @@ function AppContent() {
                     <div>
                       <div className="flex items-center space-x-2">
                         <span className="text-[10px] uppercase font-bold text-[#B85C38] bg-[#B85C38]/10 px-2.5 py-0.5 rounded border border-[#B85C38]/20">
-                          {documentAnalysis.category}
+                          {documentAnalysis.category || 'Legal Document'}
                         </span>
                         <span className="text-[11px] text-[#065F46] font-semibold flex items-center space-x-1">
                           <ShieldCheck className="w-3.5 h-3.5" />
@@ -341,32 +342,42 @@ function AppContent() {
                         </span>
                       </div>
                       <h2 className="text-xl font-bold font-heading text-[#1E1B17] mt-1">
-                        {documentAnalysis.document_title}
+                        {documentAnalysis.document_title || 'Legal Agreement'}
                       </h2>
                     </div>
 
                     {/* Overall Risk Score Pill */}
-                    <div className="flex items-center space-x-2 bg-[#F6F1E7] px-3.5 py-1.5 rounded-lg border border-[#E7E1D3]">
-                      <span className="text-xs font-medium text-[#6E6659]">Risk Assessment:</span>
-                      <span
-                        className={`text-xs font-bold px-2.5 py-0.5 rounded flex items-center space-x-1 ${documentAnalysis.overall_risk_score > 60
-                          ? 'bg-[#FFF5F5] text-[#991B1B] border border-[#FCA5A5]'
-                          : 'bg-[#ECFDF5] text-[#065F46] border border-[#6EE7B7]'
-                          }`}
-                      >
-                        <AlertOctagon className="w-3.5 h-3.5 mr-1" />
-                        <span>
-                          {documentAnalysis.overall_risk_score > 60 ? 'High Risk' : 'Moderate Risk'} (
-                          {documentAnalysis.overall_risk_score}/100)
-                        </span>
-                      </span>
-                    </div>
+                    {(() => {
+                      const overallScore = typeof documentAnalysis?.overall_risk_score === 'number' && !isNaN(documentAnalysis.overall_risk_score)
+                        ? documentAnalysis.overall_risk_score
+                        : 0;
+                      const riskText = overallScore > 60 ? 'High Risk' : overallScore > 30 ? 'Moderate Risk' : 'Low Risk';
+                      const riskBadgeColor = overallScore > 60
+                        ? 'bg-[#FFF5F5] text-[#991B1B] border border-[#FCA5A5]'
+                        : overallScore > 30
+                          ? 'bg-[#FFFBEB] text-[#92400E] border border-[#FDE68A]'
+                          : 'bg-[#ECFDF5] text-[#065F46] border border-[#6EE7B7]';
+                      return (
+                        <div className="flex items-center space-x-2 bg-[#F6F1E7] px-3.5 py-1.5 rounded-lg border border-[#E7E1D3]">
+                          <span className="text-xs font-medium text-[#6E6659]">Risk Assessment:</span>
+                          <span
+                            className={`text-xs font-bold px-2.5 py-0.5 rounded flex items-center space-x-1 ${riskBadgeColor}`}
+                          >
+                            <AlertOctagon className="w-3.5 h-3.5 mr-1" />
+                            <span>
+                              {riskText} ({overallScore}/100)
+                            </span>
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <p className="text-xs md:text-sm text-[#1E1B17] font-medium leading-relaxed">
-                    {readingLevel === 'very_simple'
-                      ? documentAnalysis.summary_very_simple
-                      : documentAnalysis.summary_simple}
+                    {(readingLevel === 'very_simple'
+                      ? documentAnalysis.summary_very_simple || documentAnalysis.summary_simple
+                      : documentAnalysis.summary_simple || documentAnalysis.summary_very_simple) ||
+                      `${documentAnalysis.document_title || 'Legal Agreement'} analyzed with ${(documentAnalysis.clauses || []).length} primary clauses extracted.`}
                   </p>
                 </div>
 
@@ -382,89 +393,154 @@ function AppContent() {
                       documentTitle={documentAnalysis.document_title}
                       category={documentAnalysis.category}
                       clauses={documentAnalysis.clauses || []}
-                      highlightedClauseId={highlightedClauseId}
+                      highlightedClauseId={highlightedClauseId || activeClauseId}
                       onClauseSelect={handleVerifyInDocument}
                     />
                   </div>
 
-                  {/* Right Column: Sticky Stacking Clauses Cards Deck */}
-                  <div className="lg:col-span-7 space-y-4">
-                    {/* Sticky Control & Quick Jump Deck Bar */}
-                    <div className="sticky top-14 sm:top-16 z-30 bg-[#FBF8F1]/95 backdrop-blur-md px-4 py-3 border-2 border-[#E7E1D3] rounded-[24px] shadow-md space-y-2.5">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <h3 className="text-sm font-extrabold font-heading text-[#1E1B17] flex items-center space-x-2">
-                          <Layers className="w-4 h-4 text-[#B85C38]" />
-                          <span>Extracted Clauses & Risk Tagging ({(documentAnalysis.clauses || []).length})</span>
-                        </h3>
+                  {/* Right Column: Single Active Card View with Synced Navigation */}
+                  {(() => {
+                    const clausesList = documentAnalysis.clauses || [];
+                    const activeIndex = Math.max(
+                      0,
+                      clausesList.findIndex((c) => c.id === (activeClauseId || highlightedClauseId))
+                    );
+                    const activeClause = clausesList[activeIndex] || clausesList[0];
 
-                        {/* Contextual Reading-Level Switcher Capsule */}
-                        <div className="flex items-center bg-[#F6F1E7] p-1 rounded-full border border-[#E7E1D3] shadow-xs">
-                          <button
-                            onClick={() => setReadingLevel('simple')}
-                            title="Plain language explanation"
-                            className={`flex items-center space-x-1 px-3 py-1 rounded-full text-xs font-bold transition-all duration-200 ${readingLevel === 'simple'
-                              ? 'bg-[#FBF8F1] text-[#1E1B17] shadow-xs border border-[#E7E1D3]'
-                              : 'text-[#6E6659] hover:text-[#1E1B17]'
-                              }`}
-                          >
-                            <Zap className="w-3.5 h-3.5 text-[#B85C38]" />
-                            <span>Simple</span>
-                          </button>
-                          <button
-                            onClick={() => setReadingLevel('very_simple')}
-                            title="Ultra-simple plain everyday language"
-                            className={`flex items-center space-x-1 px-3 py-1 rounded-full text-xs font-bold transition-all duration-200 ${readingLevel === 'very_simple'
-                              ? 'bg-[#FBF8F1] text-[#1E1B17] shadow-xs border border-[#E7E1D3]'
-                              : 'text-[#6E6659] hover:text-[#1E1B17]'
-                              }`}
-                          >
-                            <Sparkles className="w-3.5 h-3.5 text-[#B85C38]" />
-                            <span>Ultra Simple</span>
-                          </button>
-                        </div>
-                      </div>
+                    return (
+                      <div className="lg:col-span-7 space-y-4">
+                        {/* Sticky Control & Quick Jump Deck Bar */}
+                        <div className="sticky top-14 sm:top-16 z-30 bg-[#FBF8F1]/95 backdrop-blur-md px-4 py-3 border-2 border-[#E7E1D3] rounded-[24px] shadow-md space-y-2.5">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center space-x-2 min-w-0">
+                              <h3 className="text-sm font-extrabold font-heading text-[#1E1B17] flex items-center space-x-2 shrink-0">
+                                <Layers className="w-4 h-4 text-[#B85C38]" />
+                                <span>Extracted Clauses ({clausesList.length})</span>
+                              </h3>
+                              {clausesList.length > 0 && (
+                                <span className="text-[11px] font-mono font-bold bg-[#E7E1D3] text-[#1E1B17] px-2 py-0.5 rounded-full shrink-0">
+                                  #{activeIndex + 1} of {clausesList.length}
+                                </span>
+                              )}
+                            </div>
 
-                      {/* Quick Deck Jump Bar for instant clause access */}
-                      {(documentAnalysis.clauses || []).length > 1 && (
-                        <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 no-scrollbar text-xs">
-                          <span className="text-[10px] font-bold text-[#6E6659] uppercase tracking-wider shrink-0 pr-1">Deck Jump:</span>
-                          {(documentAnalysis.clauses || []).map((c, i) => (
-                            <button
-                              key={`deck-jump-${c.id}`}
-                              onClick={() => handleVerifyInDocument(c.id, i)}
-                              className="px-2.5 py-1 rounded-full bg-[#F6F1E7] hover:bg-[#B85C38] hover:text-white border border-[#E7E1D3] text-[11px] font-semibold text-[#1E1B17] shrink-0 transition-colors cursor-pointer shadow-2xs active:scale-95"
+                            <div className="flex items-center space-x-2 shrink-0">
+                              {/* Prev / Next Clause Quick Controls with Disabled States at Ends */}
+                              {clausesList.length > 1 && (
+                                <div className="flex items-center space-x-1 bg-[#F6F1E7] p-1 rounded-full border border-[#E7E1D3] shadow-2xs">
+                                  <button
+                                    onClick={() => {
+                                      if (activeIndex > 0) {
+                                        handleVerifyInDocument(clausesList[activeIndex - 1].id, activeIndex - 1);
+                                      }
+                                    }}
+                                    disabled={activeIndex === 0}
+                                    className={`p-1 rounded-full transition-colors ${activeIndex === 0
+                                        ? 'opacity-30 cursor-not-allowed text-[#6E6659]/50'
+                                        : 'hover:bg-[#E7E1D3] text-[#1E1B17] cursor-pointer'
+                                      }`}
+                                    title={activeIndex === 0 ? 'No previous clause' : 'Previous Clause'}
+                                  >
+                                    <ChevronLeft className="w-4 h-4" />
+                                  </button>
+                                  <span className="text-[11px] font-mono font-extrabold px-1.5 text-[#6E6659]">
+                                    {activeIndex + 1}/{clausesList.length}
+                                  </span>
+                                  <button
+                                    onClick={() => {
+                                      if (activeIndex < clausesList.length - 1) {
+                                        handleVerifyInDocument(clausesList[activeIndex + 1].id, activeIndex + 1);
+                                      }
+                                    }}
+                                    disabled={activeIndex === clausesList.length - 1}
+                                    className={`p-1 rounded-full transition-colors ${activeIndex === clausesList.length - 1
+                                        ? 'opacity-30 cursor-not-allowed text-[#6E6659]/50'
+                                        : 'hover:bg-[#E7E1D3] text-[#1E1B17] cursor-pointer'
+                                      }`}
+                                    title={activeIndex === clausesList.length - 1 ? 'No next clause' : 'Next Clause'}
+                                  >
+                                    <ChevronRight className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              )}
+
+                              {/* Contextual Reading-Level Switcher Capsule */}
+                              <div className="flex items-center bg-[#F6F1E7] p-1 rounded-full border border-[#E7E1D3] shadow-xs">
+                                <button
+                                  onClick={() => setReadingLevel('simple')}
+                                  title="Plain language explanation"
+                                  className={`flex items-center space-x-1 px-3 py-1 rounded-full text-xs font-bold transition-all duration-200 ${readingLevel === 'simple'
+                                      ? 'bg-[#FBF8F1] text-[#1E1B17] shadow-xs border border-[#E7E1D3]'
+                                      : 'text-[#6E6659] hover:text-[#1E1B17]'
+                                    }`}
+                                >
+                                  <Zap className="w-3.5 h-3.5 text-[#B85C38]" />
+                                  <span>Simple</span>
+                                </button>
+                                <button
+                                  onClick={() => setReadingLevel('very_simple')}
+                                  title="Ultra-simple plain everyday language"
+                                  className={`flex items-center space-x-1 px-3 py-1 rounded-full text-xs font-bold transition-all duration-200 ${readingLevel === 'very_simple'
+                                      ? 'bg-[#FBF8F1] text-[#1E1B17] shadow-xs border border-[#E7E1D3]'
+                                      : 'text-[#6E6659] hover:text-[#1E1B17]'
+                                    }`}
+                                >
+                                  <Sparkles className="w-3.5 h-3.5 text-[#B85C38]" />
+                                  <span>Ultra Simple</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Quick Deck Jump Bar for instant clause access with auto-scrolling refs */}
+                          {clausesList.length > 1 && (
+                            <div
+                              ref={deckJumpContainerRef}
+                              className="flex items-center space-x-1.5 overflow-x-auto py-2 px-1.5 no-scrollbar text-xs scroll-smooth my-0.5"
                             >
-                              #{i + 1} {c.clause_type}
-                            </button>
-                          ))}
+                              <span className="text-[10px] font-bold text-[#6E6659] uppercase tracking-wider shrink-0 pr-1">
+                                Deck Jump:
+                              </span>
+                              {clausesList.map((c, i) => (
+                                <button
+                                  key={`deck-jump-${c.id}`}
+                                  ref={(el) => {
+                                    deckJumpPillRefs.current[i] = el;
+                                  }}
+                                  onClick={() => handleVerifyInDocument(c.id, i)}
+                                  className={`px-2.5 py-1 rounded-full border text-[11px] font-semibold shrink-0 transition-all cursor-pointer shadow-2xs active:scale-95 my-0.5 ${i === activeIndex
+                                      ? 'bg-[#B85C38] text-white border-[#B85C38] font-bold ring-2 ring-[#B85C38]/30 scale-105'
+                                      : 'bg-[#F6F1E7] hover:bg-[#B85C38] hover:text-white border-[#E7E1D3] text-[#1E1B17]'
+                                    }`}
+                                >
+                                  #{i + 1} {c.clause_type}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
 
-                    {/* Cards Wrapper Runway for Sticky Deck Stacking (PromptWars Deck Style) */}
-                    <div className="cards-wrapper relative space-y-4 pb-0 min-h-[440px]">
-                      {(documentAnalysis.clauses || []).map((clause, idx) => (
-                        <div
-                          key={clause.id}
-                          id={`clause-card-${clause.id}`}
-                          className="sticky transition-all duration-300 scroll-mt-44 sm:scroll-mt-48"
-                          style={{
-                            top: `calc(${baseStickyTop}px + ${(idx % 10) * 44}px)`,
-                            zIndex: 10 + idx,
-                          }}
-                        >
-                          <ClauseCard
-                            clause={clause}
-                            index={idx}
-                            totalCards={(documentAnalysis.clauses || []).length}
-                            readingLevel={readingLevel}
-                            onVerifyInDocument={handleVerifyInDocument}
-                            onOpenShareModal={setSelectedShareClause}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                        {/* Single Active Card View Runway (Non-clipping padding) */}
+                        {activeClause && (
+                          <div
+                            id="active-clause-card-container"
+                            key={activeClause.id}
+                            className="animate-fade-in-up transition-all duration-300 pb-6 mb-4"
+                          >
+                            <ClauseCard
+                              clause={activeClause}
+                              index={activeIndex}
+                              totalCards={clausesList.length}
+                              readingLevel={readingLevel}
+                              onVerifyInDocument={handleVerifyInDocument}
+                              onOpenShareModal={setSelectedShareClause}
+                              isActive={true}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Actionable Outputs: Checklist, Possibilities, Lawyer Briefing */}
