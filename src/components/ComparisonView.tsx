@@ -70,7 +70,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ currentDocument 
   return (
     <div className="space-y-6 animate-fade-in-up">
       {/* Editorial Compare Banner Illustration */}
-      <div className="w-full flex justify-center items-center relative h-[140px] sm:h-[160px] md:h-[180px] hidden min-[380px]:flex">
+      <div className="w-full flex justify-center items-center relative h-[140px] sm:h-[160px] md:h-[180px] hidden min-[380px]:flex select-none pointer-events-none">
         {!isBannerLoaded && (
           <div className="absolute inset-0 bg-[#F6F1E7] border border-[#E7E1D3] rounded-2xl animate-pulse flex items-center justify-center text-xs text-[#A39E93]">
             <Sparkles className="w-5 h-5 text-[#B85C38]/40 animate-pulse" />
@@ -86,6 +86,8 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ currentDocument 
           onContextMenu={(e) => e.preventDefault()}
           onMouseDown={(e) => e.preventDefault()}
           onDoubleClick={(e) => e.preventDefault()}
+          onTouchStart={(e) => e.preventDefault()}
+          onTouchMove={(e) => e.preventDefault()}
           className={`w-full h-auto max-h-[140px] sm:max-h-[160px] md:max-h-[180px] object-contain mx-auto select-none pointer-events-none transition-opacity duration-300 ${
             isBannerLoaded ? 'opacity-100' : 'opacity-0'
           }`}
@@ -199,6 +201,8 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ currentDocument 
               onContextMenu={(e) => e.preventDefault()}
               onMouseDown={(e) => e.preventDefault()}
               onDoubleClick={(e) => e.preventDefault()}
+              onTouchStart={(e) => e.preventDefault()}
+              onTouchMove={(e) => e.preventDefault()}
               className={`w-24 h-24 object-contain mx-auto select-none pointer-events-none transition-opacity duration-300 ${
                 isEmptyStateLoaded ? 'opacity-100' : 'opacity-0'
               }`}

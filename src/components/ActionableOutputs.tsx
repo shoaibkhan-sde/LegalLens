@@ -10,6 +10,8 @@ import {
   AlertOctagon,
   FileText,
   Clock,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { DocumentAnalysisResult } from '../types/schemas';
 import { useLanguage } from '../context/LanguageContext';
@@ -21,6 +23,27 @@ interface ActionableOutputsProps {
 export const ActionableOutputs: React.FC<ActionableOutputsProps> = ({ document }) => {
   const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<'checklist' | 'options' | 'lawyer_brief'>('checklist');
+
+  // Checklist Deck State
+  const [checklistIndex, setChecklistIndex] = useState<number>(0);
+  const [checklistViewMode, setChecklistViewMode] = useState<'card' | 'all'>('card');
+  const checklistItems = document?.checklist?.items || [];
+  const totalChecklistItems = checklistItems.length;
+  const currentChecklistItem = checklistItems[checklistIndex] || checklistItems[0];
+
+  // Possibilities Deck State
+  const [optionsIndex, setOptionsIndex] = useState<number>(0);
+  const [optionsViewMode, setOptionsViewMode] = useState<'card' | 'all'>('card');
+  const optionsItems = document?.options_next_steps || [];
+  const totalOptionsItems = optionsItems.length;
+  const currentOptionItem = optionsItems[optionsIndex] || optionsItems[0];
+
+  // Lawyer Briefing Issues Deck State
+  const [flaggedIndex, setFlaggedIndex] = useState<number>(0);
+  const [flaggedViewMode, setFlaggedViewMode] = useState<'card' | 'all'>('card');
+  const flaggedIssues = document?.lawyer_briefing?.flagged_issues || [];
+  const totalFlaggedIssues = flaggedIssues.length;
+  const currentFlaggedIssue = flaggedIssues[flaggedIndex] || flaggedIssues[0];
 
   const handleExportCalendarICS = () => {
     const events = (document?.checklist?.items || []).filter((item) => item?.due_date_or_timeframe);
@@ -62,6 +85,7 @@ export const ActionableOutputs: React.FC<ActionableOutputsProps> = ({ document }
 
         <div className="flex items-center space-x-1 bg-[#F6F1E7] p-1 rounded-lg border border-[#E7E1D3]">
           <button
+            type="button"
             onClick={() => setActiveTab('checklist')}
             className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all duration-200 cursor-pointer ${
               activeTab === 'checklist'
@@ -74,6 +98,7 @@ export const ActionableOutputs: React.FC<ActionableOutputsProps> = ({ document }
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveTab('options')}
             className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all duration-200 cursor-pointer ${
               activeTab === 'options'
@@ -86,6 +111,7 @@ export const ActionableOutputs: React.FC<ActionableOutputsProps> = ({ document }
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveTab('lawyer_brief')}
             className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all duration-200 cursor-pointer ${
               activeTab === 'lawyer_brief'
@@ -113,6 +139,7 @@ export const ActionableOutputs: React.FC<ActionableOutputsProps> = ({ document }
             </div>
 
             <button
+              type="button"
               onClick={handleExportCalendarICS}
               className="flex items-center space-x-1.5 px-3 py-1.5 bg-[#B85C38] hover:bg-[#9C4B2B] text-white text-xs font-bold rounded transition-colors shadow-xs cursor-pointer"
             >
@@ -121,33 +148,134 @@ export const ActionableOutputs: React.FC<ActionableOutputsProps> = ({ document }
             </button>
           </div>
 
-          <div className="space-y-3">
-            {(document?.checklist?.items || []).map((item) => (
-              <div
-                key={item.id}
-                className="p-3.5 bg-[#F6F1E7] border border-[#E7E1D3] rounded-xl flex items-start space-x-3"
+          {/* Checklist Deck Navigation Bar (<-, ->) & Jump Pills */}
+          {totalChecklistItems > 1 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 bg-[#F6F1E7] p-2.5 rounded-xl border border-[#E7E1D3]">
+              {/* Previous / Next Arrows & Counter */}
+              <div className="flex items-center space-x-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setChecklistIndex((prev) => Math.max(0, prev - 1))}
+                  disabled={checklistIndex === 0}
+                  className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
+                    checklistIndex === 0
+                      ? 'bg-[#E7E1D3]/40 text-[#94A3B8] border-[#E7E1D3] cursor-not-allowed opacity-50'
+                      : 'bg-[#FBF8F1] text-[#1E1B17] hover:bg-[#B85C38] hover:text-white border-[#E7E1D3] shadow-xs'
+                  }`}
+                  title="Previous Checklist Item"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+
+                <span className="text-xs font-bold text-[#1E1B17] px-2 min-w-[85px] text-center">
+                  Item {checklistIndex + 1} of {totalChecklistItems}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => setChecklistIndex((prev) => Math.min(totalChecklistItems - 1, prev + 1))}
+                  disabled={checklistIndex === totalChecklistItems - 1}
+                  className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
+                    checklistIndex === totalChecklistItems - 1
+                      ? 'bg-[#E7E1D3]/40 text-[#94A3B8] border-[#E7E1D3] cursor-not-allowed opacity-50'
+                      : 'bg-[#FBF8F1] text-[#1E1B17] hover:bg-[#B85C38] hover:text-white border-[#E7E1D3] shadow-xs'
+                  }`}
+                  title="Next Checklist Item"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Quick Jump Pill Deck (Clean 1, 2, 3 numbers without # symbol) */}
+              <div className="flex items-center space-x-1 max-w-full overflow-x-auto no-scrollbar py-0.5">
+                {checklistItems.map((item, idx) => (
+                  <button
+                    key={item.id || idx}
+                    type="button"
+                    onClick={() => {
+                      setChecklistIndex(idx);
+                      setChecklistViewMode('card');
+                    }}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all shrink-0 cursor-pointer ${
+                      idx === checklistIndex && checklistViewMode === 'card'
+                        ? 'bg-[#B85C38] text-white shadow-xs'
+                        : 'bg-[#FBF8F1] text-[#6E6659] hover:text-[#1E1B17] hover:bg-[#E7E1D3]/60 border border-[#E7E1D3]'
+                    }`}
+                  >
+                    {idx + 1}
+                  </button>
+                ))}
+              </div>
+
+              {/* View Mode Toggle */}
+              <button
+                type="button"
+                onClick={() => setChecklistViewMode(checklistViewMode === 'card' ? 'all' : 'card')}
+                className="text-[11px] font-semibold text-[#6E6659] hover:text-[#1E1B17] underline decoration-[#B85C38] shrink-0 cursor-pointer"
               >
-                <div className="w-7 h-7 rounded bg-[#B85C38]/10 text-[#B85C38] flex items-center justify-center shrink-0 border border-[#B85C38]/20 mt-0.5">
-                  <FileCheck className="w-3.5 h-3.5" />
-                </div>
-                <div className="flex-1 space-y-1">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-bold text-[#1E1B17]">{item.title}</h4>
-                    {item.due_date_or_timeframe && (
-                      <span className="text-[10px] bg-[#FBF8F1] text-[#B85C38] font-semibold px-2 py-0.5 rounded border border-[#E7E1D3] flex items-center space-x-1">
-                        <Clock className="w-2.5 h-2.5" />
-                        <span>{item.due_date_or_timeframe}</span>
-                      </span>
-                    )}
+                {checklistViewMode === 'card' ? 'View All List' : `Card View (1 of ${totalChecklistItems})`}
+              </button>
+            </div>
+          )}
+
+          {/* Render Active View: Single Card Deck View (default) or Full List */}
+          {checklistViewMode === 'card' ? (
+            currentChecklistItem && (
+              <div
+                key={currentChecklistItem.id || checklistIndex}
+                className="p-4 sm:p-5 bg-[#F6F1E7] border-2 border-[#B85C38]/40 rounded-2xl space-y-3 shadow-xs animate-fade-in-up"
+              >
+                <div className="flex items-start space-x-3">
+                  <div className="w-8 h-8 rounded-lg bg-[#B85C38]/10 text-[#B85C38] flex items-center justify-center shrink-0 border border-[#B85C38]/20 mt-0.5">
+                    <FileCheck className="w-4 h-4" />
                   </div>
-                  <p className="text-xs text-[#6E6659]">{item.description}</p>
-                  <p className="text-xs font-semibold text-[#065F46] pt-0.5">
-                    {t('outputs.action_label')}: {item.action_required}
-                  </p>
+                  <div className="flex-1 space-y-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h4 className="text-sm font-bold text-[#1E1B17]">{currentChecklistItem.title}</h4>
+                      {currentChecklistItem.due_date_or_timeframe && (
+                        <span className="text-xs bg-[#FBF8F1] text-[#B85C38] font-bold px-2.5 py-1 rounded-full border border-[#E7E1D3] flex items-center space-x-1 shadow-2xs">
+                          <Clock className="w-3 h-3" />
+                          <span>{currentChecklistItem.due_date_or_timeframe}</span>
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs sm:text-sm text-[#6E6659] leading-relaxed">{currentChecklistItem.description}</p>
+                    <div className="p-3 bg-[#FBF8F1] rounded-xl border border-[#E7E1D3] text-xs font-semibold text-[#065F46] mt-2">
+                      {t('outputs.action_label')}: {currentChecklistItem.action_required}
+                    </div>
+                  </div>
                 </div>
               </div>
-            ))}
-          </div>
+            )
+          ) : (
+            <div className="space-y-3">
+              {checklistItems.map((item) => (
+                <div
+                  key={item.id}
+                  className="p-3.5 bg-[#F6F1E7] border border-[#E7E1D3] rounded-xl flex items-start space-x-3"
+                >
+                  <div className="w-7 h-7 rounded bg-[#B85C38]/10 text-[#B85C38] flex items-center justify-center shrink-0 border border-[#B85C38]/20 mt-0.5">
+                    <FileCheck className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="flex-1 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold text-[#1E1B17]">{item.title}</h4>
+                      {item.due_date_or_timeframe && (
+                        <span className="text-[10px] bg-[#FBF8F1] text-[#B85C38] font-semibold px-2 py-0.5 rounded border border-[#E7E1D3] flex items-center space-x-1">
+                          <Clock className="w-2.5 h-2.5" />
+                          <span>{item.due_date_or_timeframe}</span>
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-[#6E6659]">{item.description}</p>
+                    <p className="text-xs font-semibold text-[#065F46] pt-0.5">
+                      {t('outputs.action_label')}: {item.action_required}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -158,25 +286,136 @@ export const ActionableOutputs: React.FC<ActionableOutputsProps> = ({ document }
             <strong className="text-[#B85C38]">{t('outputs.framing_note_title')}</strong> {t('outputs.framing_note_desc')}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {(document?.options_next_steps || []).map((opt) => (
-              <div
-                key={opt.id}
-                className="p-4 bg-[#F6F1E7] border border-[#E7E1D3] rounded-xl space-y-2"
-              >
-                <h4 className="text-xs font-bold text-[#1E1B17] flex items-center space-x-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-[#B85C38]" />
-                  <span>{opt.title}</span>
-                </h4>
-                <p className="text-xs text-[#6E6659] leading-relaxed">{opt.description}</p>
+          {/* Possibilities Deck Navigation Bar (<-, ->) & Jump Pills */}
+          {totalOptionsItems > 1 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 bg-[#F6F1E7] p-2.5 rounded-xl border border-[#E7E1D3]">
+              {/* Previous / Next Arrows & Counter */}
+              <div className="flex items-center space-x-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setOptionsIndex((prev) => Math.max(0, prev - 1))}
+                  disabled={optionsIndex === 0}
+                  className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
+                    optionsIndex === 0
+                      ? 'bg-[#E7E1D3]/40 text-[#94A3B8] border-[#E7E1D3] cursor-not-allowed opacity-50'
+                      : 'bg-[#FBF8F1] text-[#1E1B17] hover:bg-[#B85C38] hover:text-white border-[#E7E1D3] shadow-xs'
+                  }`}
+                  title="Previous Option"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
 
-                <div className="pt-2 border-t border-[#E7E1D3] text-xs space-y-0.5">
-                  <p className="text-[#065F46] font-semibold">{t('outputs.benefit')}: {opt.benefit}</p>
-                  {opt.tradeoff && <p className="text-[#6E6659]">{t('outputs.tradeoff')}: {opt.tradeoff}</p>}
+                <span className="text-xs font-bold text-[#1E1B17] px-2 min-w-[95px] text-center">
+                  Option {optionsIndex + 1} of {totalOptionsItems}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => setOptionsIndex((prev) => Math.min(totalOptionsItems - 1, prev + 1))}
+                  disabled={optionsIndex === totalOptionsItems - 1}
+                  className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
+                    optionsIndex === totalOptionsItems - 1
+                      ? 'bg-[#E7E1D3]/40 text-[#94A3B8] border-[#E7E1D3] cursor-not-allowed opacity-50'
+                      : 'bg-[#FBF8F1] text-[#1E1B17] hover:bg-[#B85C38] hover:text-white border-[#E7E1D3] shadow-xs'
+                  }`}
+                  title="Next Option"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Quick Jump Pill Deck (Clean 1, 2, 3 numbers without # symbol) */}
+              <div className="flex items-center space-x-1 max-w-full overflow-x-auto no-scrollbar py-0.5">
+                {optionsItems.map((opt, idx) => (
+                  <button
+                    key={opt.id || idx}
+                    type="button"
+                    onClick={() => {
+                      setOptionsIndex(idx);
+                      setOptionsViewMode('card');
+                    }}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all shrink-0 cursor-pointer ${
+                      idx === optionsIndex && optionsViewMode === 'card'
+                        ? 'bg-[#B85C38] text-white shadow-xs'
+                        : 'bg-[#FBF8F1] text-[#6E6659] hover:text-[#1E1B17] hover:bg-[#E7E1D3]/60 border border-[#E7E1D3]'
+                    }`}
+                  >
+                    {idx + 1}
+                  </button>
+                ))}
+              </div>
+
+              {/* View Mode Toggle */}
+              <button
+                type="button"
+                onClick={() => setOptionsViewMode(optionsViewMode === 'card' ? 'all' : 'card')}
+                className="text-[11px] font-semibold text-[#6E6659] hover:text-[#1E1B17] underline decoration-[#B85C38] shrink-0 cursor-pointer"
+              >
+                {optionsViewMode === 'card' ? 'View All List' : `Card View (1 of ${totalOptionsItems})`}
+              </button>
+            </div>
+          )}
+
+          {/* Render Active View: Single Card Deck View (default) or Full Grid */}
+          {optionsViewMode === 'card' ? (
+            currentOptionItem && (
+              <div
+                key={currentOptionItem.id || optionsIndex}
+                className="p-5 bg-[#F6F1E7] border-2 border-[#B85C38]/40 rounded-2xl space-y-3 shadow-xs animate-fade-in-up"
+              >
+                <div className="space-y-1.5">
+                  <h4 className="text-sm font-bold text-[#1E1B17] flex items-center space-x-2">
+                    <Sparkles className="w-4 h-4 text-[#B85C38] shrink-0" />
+                    <span>{currentOptionItem.title}</span>
+                  </h4>
+                  <p className="text-xs sm:text-sm text-[#6E6659] leading-relaxed">{currentOptionItem.description}</p>
+                </div>
+
+                <div className="pt-3 border-t border-[#E7E1D3] text-xs space-y-1.5">
+                  <p className="text-[#065F46] font-semibold flex items-start space-x-1.5 p-2 bg-[#FBF8F1] rounded-lg border border-[#E7E1D3]">
+                    <span className="font-bold">{t('outputs.benefit')}:</span>
+                    <span>{currentOptionItem.benefit}</span>
+                  </p>
+                  {currentOptionItem.tradeoff && (
+                    <p className="text-[#6E6659] flex items-start space-x-1.5 p-2 bg-[#FBF8F1] rounded-lg border border-[#E7E1D3]">
+                      <span className="font-bold text-[#1E1B17]">{t('outputs.tradeoff')}:</span>
+                      <span>{currentOptionItem.tradeoff}</span>
+                    </p>
+                  )}
                 </div>
               </div>
-            ))}
-          </div>
+            )
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {optionsItems.map((opt) => (
+                <div
+                  key={opt.id}
+                  className="p-4 bg-[#F6F1E7] border border-[#E7E1D3] rounded-xl space-y-2 flex flex-col justify-between"
+                >
+                  <div className="space-y-1.5">
+                    <h4 className="text-xs sm:text-sm font-bold text-[#1E1B17] flex items-start space-x-2">
+                      <Sparkles className="w-4 h-4 text-[#B85C38] shrink-0 mt-0.5" />
+                      <span>{opt.title}</span>
+                    </h4>
+                    <p className="text-xs text-[#6E6659] leading-relaxed">{opt.description}</p>
+                  </div>
+
+                  <div className="pt-2 border-t border-[#E7E1D3] text-xs space-y-1">
+                    <p className="text-[#065F46] font-semibold flex items-start space-x-1">
+                      <span>{t('outputs.benefit')}:</span>
+                      <span>{opt.benefit}</span>
+                    </p>
+                    {opt.tradeoff && (
+                      <p className="text-[#6E6659] flex items-start space-x-1">
+                        <span>{t('outputs.tradeoff')}:</span>
+                        <span>{opt.tradeoff}</span>
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -190,37 +429,126 @@ export const ActionableOutputs: React.FC<ActionableOutputsProps> = ({ document }
             </div>
 
             <button
+              type="button"
               onClick={handlePrintLawyerBrief}
-              className="flex items-center space-x-1.5 px-3 py-1.5 bg-[#F6F1E7] hover:bg-[#E7E1D3]/50 text-[#1E1B17] text-xs font-semibold rounded border border-[#E7E1D3] transition-colors"
+              className="flex items-center space-x-1.5 px-3 py-1.5 bg-[#F6F1E7] hover:bg-[#E7E1D3]/50 text-[#1E1B17] text-xs font-semibold rounded border border-[#E7E1D3] transition-colors cursor-pointer"
             >
               <Printer className="w-3.5 h-3.5 text-[#B85C38]" />
               <span>Print Packet</span>
             </button>
           </div>
 
-          {/* Flagged Issues */}
+          {/* Flagged Issues with Card Deck View Navigation */}
           <div className="space-y-3">
-            <h4 className="text-xs font-bold uppercase text-[#991B1B] tracking-wider">
-              Flagged High-Risk Issues ({(document?.lawyer_briefing?.flagged_issues || []).length})
-            </h4>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h4 className="text-xs font-bold uppercase text-[#991B1B] tracking-wider">
+                Flagged High-Risk Issues ({totalFlaggedIssues})
+              </h4>
 
-            {(document?.lawyer_briefing?.flagged_issues || []).map((issue, idx) => (
-              <div
-                key={idx}
-                className="p-3.5 bg-[#FFF5F5] border border-[#FCA5A5] rounded-xl space-y-1.5"
-              >
-                <div className="flex items-center space-x-2 text-[#991B1B] font-bold text-xs">
-                  <AlertOctagon className="w-3.5 h-3.5" />
-                  <span>{issue.clause_title}</span>
+              {totalFlaggedIssues > 1 && (
+                <button
+                  type="button"
+                  onClick={() => setFlaggedViewMode(flaggedViewMode === 'card' ? 'all' : 'card')}
+                  className="text-[11px] font-semibold text-[#6E6659] hover:text-[#1E1B17] underline decoration-[#B85C38] cursor-pointer"
+                >
+                  {flaggedViewMode === 'card' ? 'View All Issues' : `Card View (1 of ${totalFlaggedIssues})`}
+                </button>
+              )}
+            </div>
+
+            {totalFlaggedIssues > 1 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 bg-[#F6F1E7] p-2.5 rounded-xl border border-[#E7E1D3]">
+                {/* Previous / Next Arrows & Counter */}
+                <div className="flex items-center space-x-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setFlaggedIndex((prev) => Math.max(0, prev - 1))}
+                    disabled={flaggedIndex === 0}
+                    className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
+                      flaggedIndex === 0
+                        ? 'bg-[#E7E1D3]/40 text-[#94A3B8] border-[#E7E1D3] cursor-not-allowed opacity-50'
+                        : 'bg-[#FBF8F1] text-[#1E1B17] hover:bg-[#B85C38] hover:text-white border-[#E7E1D3] shadow-xs'
+                    }`}
+                    title="Previous Flagged Issue"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+
+                  <span className="text-xs font-bold text-[#1E1B17] px-2 min-w-[85px] text-center">
+                    Issue {flaggedIndex + 1} of {totalFlaggedIssues}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => setFlaggedIndex((prev) => Math.min(totalFlaggedIssues - 1, prev + 1))}
+                    disabled={flaggedIndex === totalFlaggedIssues - 1}
+                    className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
+                      flaggedIndex === totalFlaggedIssues - 1
+                        ? 'bg-[#E7E1D3]/40 text-[#94A3B8] border-[#E7E1D3] cursor-not-allowed opacity-50'
+                        : 'bg-[#FBF8F1] text-[#1E1B17] hover:bg-[#B85C38] hover:text-white border-[#E7E1D3] shadow-xs'
+                    }`}
+                    title="Next Flagged Issue"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
                 </div>
-                <p className="text-xs text-[#1E1B17]">{issue.concern}</p>
-                {issue.suggested_clause_edit && (
-                  <div className="p-2.5 bg-[#FBF8F1] rounded text-xs text-[#065F46] font-mono border border-[#E7E1D3]">
-                    Suggested Edit: {issue.suggested_clause_edit}
+
+                {/* Quick Jump Pill Deck (Clean 1, 2, 3 numbers without # symbol) */}
+                <div className="flex items-center space-x-1 max-w-full overflow-x-auto no-scrollbar py-0.5">
+                  {flaggedIssues.map((issue, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => {
+                        setFlaggedIndex(idx);
+                        setFlaggedViewMode('card');
+                      }}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all shrink-0 cursor-pointer ${
+                        idx === flaggedIndex && flaggedViewMode === 'card'
+                          ? 'bg-[#991B1B] text-white shadow-xs'
+                          : 'bg-[#FBF8F1] text-[#6E6659] hover:text-[#1E1B17] hover:bg-[#E7E1D3]/60 border border-[#E7E1D3]'
+                      }`}
+                    >
+                      {idx + 1}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Render Active View: Single Issue Card Deck View (default) or Full List */}
+            {flaggedViewMode === 'card' && currentFlaggedIssue ? (
+              <div className="p-4 bg-[#FFF5F5] border-2 border-[#FCA5A5] rounded-xl space-y-2 animate-fade-in-up">
+                <div className="flex items-center space-x-2 text-[#991B1B] font-bold text-xs">
+                  <AlertOctagon className="w-4 h-4 shrink-0" />
+                  <span>{currentFlaggedIssue.clause_title}</span>
+                </div>
+                <p className="text-xs sm:text-sm text-[#1E1B17] leading-relaxed">{currentFlaggedIssue.concern}</p>
+                {currentFlaggedIssue.suggested_clause_edit && (
+                  <div className="p-3 bg-[#FBF8F1] rounded-xl text-xs text-[#065F46] font-mono border border-[#E7E1D3] mt-2">
+                    Suggested Edit: {currentFlaggedIssue.suggested_clause_edit}
                   </div>
                 )}
               </div>
-            ))}
+            ) : (
+              flaggedIssues.map((issue, idx) => (
+                <div
+                  key={idx}
+                  className="p-3.5 bg-[#FFF5F5] border border-[#FCA5A5] rounded-xl space-y-1.5"
+                >
+                  <div className="flex items-center space-x-2 text-[#991B1B] font-bold text-xs">
+                    <AlertOctagon className="w-3.5 h-3.5" />
+                    <span>{issue.clause_title}</span>
+                  </div>
+                  <p className="text-xs text-[#1E1B17]">{issue.concern}</p>
+                  {issue.suggested_clause_edit && (
+                    <div className="p-2.5 bg-[#FBF8F1] rounded text-xs text-[#065F46] font-mono border border-[#E7E1D3]">
+                      Suggested Edit: {issue.suggested_clause_edit}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
           </div>
 
           {/* Ready to Ask Questions */}

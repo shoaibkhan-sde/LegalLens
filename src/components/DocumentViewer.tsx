@@ -41,7 +41,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
   return (
     <div
-      className="bg-[#FBF8F1] border-2 border-[#E7E1D3] rounded-[28px] p-4 sm:p-5 shadow-lg flex flex-col h-[440px] overflow-hidden transition-all duration-300"
+      className="bg-[#FBF8F1] border-2 border-[#E7E1D3] rounded-[28px] p-4 sm:p-5 shadow-lg flex flex-col h-full min-h-[440px] max-h-[440px] overflow-hidden transition-all duration-300"
       style={{
         boxShadow: '0 12px 32px -4px rgba(30, 27, 23, 0.14), 0 4px 12px -2px rgba(0, 0, 0, 0.08)',
       }}

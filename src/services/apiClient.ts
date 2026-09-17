@@ -77,20 +77,42 @@ export class ApiClient {
     text?: string,
     file?: File,
     language?: 'en' | 'hi',
-    onProgress?: (stageIndex: number, status: 'in_progress' | 'completed', elapsedMs?: number) => void
+    onProgress?: (stageIndex: number, status: 'in_progress' | 'completed', elapsedMs?: number) => void,
+    signal?: AbortSignal
   ): Promise<DocumentAnalysisResult> {
-    const formData = new FormData();
-    if (text) formData.append('text', text);
-    if (file) formData.append('file', file);
-    formData.append('language', language || this.getActiveLanguage());
+    let reqBody: any;
+    const reqHeaders: Record<string, string> = {
+      'Accept': 'text/event-stream',
+    };
 
-    const res = await fetch('/api/analyze?stream=true', {
-      method: 'POST',
-      headers: {
-        'Accept': 'text/event-stream',
-      },
-      body: formData,
-    });
+    if (file) {
+      const formData = new FormData();
+      formData.append('file', file);
+      if (text) formData.append('text', text);
+      formData.append('language', language || this.getActiveLanguage());
+      reqBody = formData;
+    } else {
+      reqHeaders['Content-Type'] = 'application/json';
+      reqBody = JSON.stringify({
+        text: text || '',
+        language: language || this.getActiveLanguage(),
+      });
+    }
+
+    let res: Response;
+    try {
+      res = await fetch('/api/analyze?stream=true', {
+        method: 'POST',
+        headers: reqHeaders,
+        body: reqBody,
+        signal,
+      });
+    } catch (fetchErr: any) {
+      if (fetchErr.name === 'AbortError' || signal?.aborted) {
+        throw new Error('CANCELED_BY_USER');
+      }
+      throw fetchErr;
+    }
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Analysis request failed' }));
@@ -107,45 +129,55 @@ export class ApiClient {
     let finalResult: DocumentAnalysisResult | null = null;
     let streamError: string | null = null;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    try {
+      while (true) {
+        if (signal?.aborted) {
+          throw new Error('CANCELED_BY_USER');
+        }
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      buffer += decoder.decode(value, { stream: true });
-      const blocks = buffer.split('\n\n');
-      buffer = blocks.pop() || '';
+        buffer += decoder.decode(value, { stream: true });
+        const blocks = buffer.split('\n\n');
+        buffer = blocks.pop() || '';
 
-      for (const block of blocks) {
-        if (!block.trim()) continue;
-        const eventMatch = block.match(/^event:\s*(.+)$/m);
-        const dataMatch = block.match(/^data:\s*(.+)$/m);
+        for (const block of blocks) {
+          if (!block.trim()) continue;
+          const eventMatch = block.match(/^event:\s*(.+)$/m);
+          const dataMatch = block.match(/^data:\s*(.+)$/m);
 
-        const event = eventMatch ? eventMatch[1].trim() : 'message';
-        const rawData = dataMatch ? dataMatch[1].trim() : '';
+          const event = eventMatch ? eventMatch[1].trim() : 'message';
+          const rawData = dataMatch ? dataMatch[1].trim() : '';
 
-        if (!rawData) continue;
+          if (!rawData) continue;
 
-        try {
-          const parsed = JSON.parse(rawData);
-          if (event === 'progress' && onProgress) {
-            const STAGE_MAP: Record<string, number> = {
-              guard1: 0,
-              ocr_parsing: 1,
-              clause_chunking: 2,
-              risk_tagging: 3,
-              ai_synthesis: 4,
-            };
-            const idx = typeof parsed.stageIndex === 'number' ? parsed.stageIndex : (STAGE_MAP[parsed.stage] ?? 0);
-            onProgress(idx, parsed.status, parsed.elapsed_ms);
-          } else if (event === 'result') {
-            finalResult = parsed;
-          } else if (event === 'error') {
-            streamError = parsed.error || 'Pipeline execution failed.';
+          try {
+            const parsed = JSON.parse(rawData);
+            if (event === 'progress' && onProgress) {
+              const STAGE_MAP: Record<string, number> = {
+                guard1: 0,
+                ocr_parsing: 1,
+                clause_chunking: 2,
+                risk_tagging: 3,
+                ai_synthesis: 4,
+              };
+              const idx = typeof parsed.stageIndex === 'number' ? parsed.stageIndex : (STAGE_MAP[parsed.stage] ?? 0);
+              onProgress(idx, parsed.status, parsed.elapsed_ms);
+            } else if (event === 'result') {
+              finalResult = parsed;
+            } else if (event === 'error') {
+              streamError = parsed.error || 'Pipeline execution failed.';
+            }
+          } catch (e) {
+            console.warn('Error parsing SSE payload block:', e);
           }
-        } catch (e) {
-          console.warn('Error parsing SSE payload block:', e);
         }
       }
+    } catch (err: any) {
+      if (err.name === 'AbortError' || err.message === 'CANCELED_BY_USER' || signal?.aborted) {
+        throw new Error('CANCELED_BY_USER');
+      }
+      throw err;
     }
 
     if (streamError) {

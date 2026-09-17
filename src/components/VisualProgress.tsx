@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShieldCheck, FileSearch, Layers, AlertTriangle, Sparkles, Check, X, AlertOctagon } from 'lucide-react';
+import { ShieldCheck, FileSearch, Layers, AlertTriangle, Sparkles, Check, X, AlertOctagon, XCircle } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 
 export interface VisualProgressProps {
@@ -7,12 +7,14 @@ export interface VisualProgressProps {
   stepStatuses?: Array<'pending' | 'in_progress' | 'completed' | 'failed'>;
   elapsedMs?: Record<number, number>;
   errorMessage?: string | null;
+  onCancel?: () => void;
 }
 
 export const VisualProgress: React.FC<VisualProgressProps> = ({
   stepStatuses,
   elapsedMs = {},
   errorMessage,
+  onCancel,
 }) => {
   const { t, language } = useLanguage();
 
@@ -48,7 +50,7 @@ export const VisualProgress: React.FC<VisualProgressProps> = ({
           : 'bg-[#FBF8F1] border-[#E7E1D3]'
       }`}
     >
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center space-x-3">
           <div
             className={`w-9 h-9 rounded-xl flex items-center justify-center border shadow-xs ${
@@ -81,18 +83,31 @@ export const VisualProgress: React.FC<VisualProgressProps> = ({
           </div>
         </div>
 
-        {hasFailed ? (
-          <span className="text-xs font-bold text-[#991B1B] bg-[#991B1B]/10 px-2.5 py-1 rounded-lg border border-[#FCA5A5] font-mono flex items-center space-x-1">
-            <X className="w-3.5 h-3.5 text-[#991B1B] stroke-[3]" />
-            <span>
-              {language === 'hi' ? `चरण ${failedIdx + 1} पर विफल` : `FAILED AT STEP ${failedIdx + 1}`}
+        <div className="flex items-center space-x-2">
+          {onCancel && !hasFailed && (
+            <button
+              onClick={onCancel}
+              title={t('pipeline.btn_cancel_desc')}
+              className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-[#991B1B] bg-[#991B1B]/10 hover:bg-[#991B1B]/20 border border-[#FCA5A5] transition-all cursor-pointer shadow-xs active:scale-95"
+            >
+              <XCircle className="w-4 h-4 text-[#991B1B]" />
+              <span>{t('pipeline.btn_cancel')}</span>
+            </button>
+          )}
+
+          {hasFailed ? (
+            <span className="text-xs font-bold text-[#991B1B] bg-[#991B1B]/10 px-2.5 py-1 rounded-lg border border-[#FCA5A5] font-mono flex items-center space-x-1">
+              <X className="w-3.5 h-3.5 text-[#991B1B] stroke-[3]" />
+              <span>
+                {language === 'hi' ? `चरण ${failedIdx + 1} पर विफल` : `FAILED AT STEP ${failedIdx + 1}`}
+              </span>
             </span>
-          </span>
-        ) : (
-          <span className="text-xs font-semibold text-[#B85C38] bg-[#B85C38]/10 px-2.5 py-0.5 rounded border border-[#B85C38]/20 font-mono">
-            {t('pipeline.complete', { percent: progressPercentage })}
-          </span>
-        )}
+          ) : (
+            <span className="text-xs font-semibold text-[#B85C38] bg-[#B85C38]/10 px-2.5 py-0.5 rounded border border-[#B85C38]/20 font-mono">
+              {t('pipeline.complete', { percent: progressPercentage })}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Progress Bar */}

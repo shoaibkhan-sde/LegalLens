@@ -14,6 +14,7 @@ import {
   QrCode,
   X,
   CameraOff,
+  XCircle,
   Copy,
   Check,
 } from 'lucide-react';
@@ -31,12 +32,14 @@ interface DocumentCaptureProps {
   onAnalyzeText: (text: string, file?: File) => void;
   isLoading: boolean;
   onInputContextChange?: (context: ActiveInputContext) => void;
+  onCancelAnalysis?: () => void;
 }
 
 export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
   onAnalyzeText,
   isLoading,
   onInputContextChange,
+  onCancelAnalysis,
 }) => {
   const { t } = useLanguage();
   const [isMobile, setIsMobile] = useState<boolean>(() => isMobileDevice());
@@ -44,12 +47,10 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       if (params.get('mode') === 'camera' || window.location.hash === '#camera') {
-        if (isMobileDevice()) {
-          return 'camera';
-        }
+        return 'camera';
       }
     }
-    return isMobileDevice() ? 'camera' : 'upload';
+    return 'upload';
   });
 
   useEffect(() => {
@@ -119,12 +120,41 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
     processUploadedFile();
   }, [uploadedFile]);
 
-  useEffect(() => {
-    if (capturedPhoto) {
-      setExtractedFileText(
-        "Residential Tenancy Agreement (Bengaluru) camera snapshot captured. Rent: ₹25,000 monthly due by 5th. Deposit: ₹1,50,000 refundable after 45 days. Lock-in: 6 months."
-      );
+  const dataURLtoFile = (dataurl: string, filename: string): File => {
+    const arr = dataurl.split(',');
+    const mimeMatch = arr[0].match(/:(.*?);/);
+    const mime = mimeMatch ? mimeMatch[1] : 'image/png';
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
     }
+    return new File([u8arr], filename, { type: mime });
+  };
+
+  useEffect(() => {
+    if (!capturedPhoto) return;
+
+    const processCapturedPhoto = async () => {
+      try {
+        const photoFile = dataURLtoFile(capturedPhoto, 'camera_snapshot.png');
+        const res = await ApiClient.extractPreviewText(photoFile);
+        if (res.text && res.text.trim().length > 10) {
+          setExtractedFileText(res.text);
+        } else {
+          setExtractedFileText(
+            res.error || "I couldn't read this document's text — try re-uploading, or use a clearer photo/scan"
+          );
+        }
+      } catch {
+        setExtractedFileText(
+          "I couldn't read this document's text — try re-uploading, or use a clearer photo/scan"
+        );
+      }
+    };
+
+    processCapturedPhoto();
   }, [capturedPhoto]);
 
   useEffect(() => {
@@ -242,8 +272,13 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
 
   const handleSubmitPhoto = () => {
     if (capturedPhoto) {
-      const photoText = `RESIDENTIAL TENANCY AGREEMENT (BENGALURU)\n\nThis agreement is made between Mr. Ramesh Sharma (Lessor) and Mr. Ankit Kumar (Lessee) for Flat 302 Indiranagar Bengaluru.\nRent: ₹25,000 monthly due by 5th. Deposit: ₹1,50,000 refundable after 45 days subject to 1 month rent painting deduction.\nLock-in: 6 months lock-in period. 60 days notice required thereafter.`;
-      onAnalyzeText(photoText);
+      try {
+        const photoFile = dataURLtoFile(capturedPhoto, 'camera_snapshot.png');
+        onAnalyzeText('', photoFile);
+      } catch (err) {
+        console.warn('Failed to convert captured photo to File:', err);
+        onAnalyzeText(extractedFileText || '');
+      }
     }
   };
 
@@ -294,12 +329,9 @@ The Lessee agrees to defend, indemnify, and hold harmless the Lessor against all
     }
   };
 
-  const rawHandoffUrl = typeof window !== 'undefined'
+  const handoffUrl = typeof window !== 'undefined'
     ? `${window.location.origin}${window.location.pathname}?mode=camera`
-    : 'https://localhost:5173/?mode=camera';
-
-  // Ensure HTTPS scheme so mobile browsers allow camera access (getUserMedia requires HTTPS context)
-  const handoffUrl = rawHandoffUrl.replace(/^http:/, 'https:');
+    : 'http://localhost:5173/?mode=camera';
 
   const handleCopyLink = async () => {
     try {
@@ -448,6 +480,7 @@ The Lessee agrees to defend, indemnify, and hold harmless the Lessor against all
               onChange={handleFileChange}
               className="hidden"
               id="file-upload-input"
+              name="fileUpload"
             />
 
             {!uploadedFile && !isDragging && (
@@ -496,6 +529,7 @@ The Lessee agrees to defend, indemnify, and hold harmless the Lessor against all
               <input
                 type="file"
                 id="mobile-native-camera-input"
+                name="cameraUpload"
                 accept="image/*"
                 capture="environment"
                 onChange={handleFileChange}
@@ -516,10 +550,12 @@ The Lessee agrees to defend, indemnify, and hold harmless the Lessor against all
           )}
 
           <div>
-            <label className="block text-xs font-medium text-[#6E6659] mb-1">
+            <label htmlFor="manual-text-input" className="block text-xs font-medium text-[#6E6659] mb-1">
               {t('capture.paste_label')}
             </label>
             <AutoResizeTextarea
+              id="manual-text-input"
+              name="manualText"
               rows={3}
               value={manualText}
               onChange={(e) => setManualText(e.target.value)}
@@ -531,18 +567,32 @@ The Lessee agrees to defend, indemnify, and hold harmless the Lessor against all
           {/* Single Dominant CTA Accent Rule */}
           {(() => {
             const isAnalyzeDisabled = isLoading || (!uploadedFile && !manualText.trim());
+
+            if (isLoading) {
+              return (
+                <button
+                  disabled
+                  className="w-full py-2.5 font-bold text-xs rounded-lg flex items-center justify-center space-x-2 bg-[#D9A391] text-[#FBF8F1] cursor-not-allowed border border-[#C58E7C]/40 shadow-none"
+                >
+                  <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                  <span>{t('capture.btn_analyzing')}</span>
+                </button>
+              );
+            }
+
             return (
               <button
                 onClick={handleSubmitFile}
                 disabled={isAnalyzeDisabled}
                 aria-disabled={isAnalyzeDisabled}
-                className={`w-full py-2.5 font-bold text-xs rounded-lg flex items-center justify-center space-x-2 transition-all duration-200 ease-out ${isAnalyzeDisabled
+                className={`w-full py-2.5 font-bold text-xs rounded-lg flex items-center justify-center space-x-2 transition-all duration-200 ease-out ${
+                  isAnalyzeDisabled
                     ? 'bg-[#D9A391] text-[#FBF8F1]/75 cursor-not-allowed border border-[#C58E7C]/40 shadow-none'
                     : 'bg-[#B85C38] hover:bg-[#9C4B2B] text-white cursor-pointer shadow-xs border border-[#B85C38] active:scale-[0.99]'
-                  }`}
+                }`}
               >
                 <FileText className="w-4 h-4" />
-                <span>{isLoading ? t('capture.btn_analyzing') : t('capture.btn_analyze')}</span>
+                <span>{t('capture.btn_analyze')}</span>
               </button>
             );
           })()}
@@ -560,12 +610,16 @@ The Lessee agrees to defend, indemnify, and hold harmless the Lessor against all
                   <img
                     src="/assets/empty-state-illustration.png"
                     alt="Illustration of a magnifying glass examining a document"
+                    width={96}
+                    height={96}
                     loading="lazy"
                     draggable="false"
                     onDragStart={(e) => e.preventDefault()}
                     onContextMenu={(e) => e.preventDefault()}
                     onMouseDown={(e) => e.preventDefault()}
                     onDoubleClick={(e) => e.preventDefault()}
+                    onTouchStart={(e) => e.preventDefault()}
+                    onTouchMove={(e) => e.preventDefault()}
                     className="w-24 h-24 object-contain mx-auto select-none pointer-events-none"
                   />
                   <div>
@@ -628,6 +682,8 @@ The Lessee agrees to defend, indemnify, and hold harmless the Lessor against all
                   onContextMenu={(e) => e.preventDefault()}
                   onMouseDown={(e) => e.preventDefault()}
                   onDoubleClick={(e) => e.preventDefault()}
+                  onTouchStart={(e) => e.preventDefault()}
+                  onTouchMove={(e) => e.preventDefault()}
                   className="max-h-[300px] object-contain select-none pointer-events-none"
                 />
                 <div className="absolute top-3 left-3 bg-[#D1FAE5] text-[#065F46] border border-[#6EE7B7] px-2.5 py-1 rounded text-xs font-semibold flex items-center space-x-1">

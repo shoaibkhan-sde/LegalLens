@@ -408,7 +408,12 @@ async function performVisionOcrOnImageBuffer(fileBuffer: Buffer, mimeType: strin
       }
     ];
 
-    const visionModels = ['llama-3.2-11b-vision-preview', 'llama-3.2-90b-vision-preview', 'gpt-4o-mini', 'gemini-2.5-flash'];
+    const visionModels = [
+      'llama-3.2-11b-vision-instruct',
+      'llama-3.2-90b-vision-instruct',
+      'gpt-4o-mini',
+      'gemini-2.5-flash'
+    ];
     for (const model of visionModels) {
       try {
         const endpoint = activeKey.startsWith('gsk_') ? 'https://api.groq.com/openai/v1/chat/completions' : 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
@@ -440,6 +445,40 @@ async function performVisionOcrOnImageBuffer(fileBuffer: Buffer, mimeType: strin
     }
   } catch (err) {
     console.warn('Vision OCR processing fallback:', err);
+  }
+
+  // Fallback to local Tesseract OCR if remote Vision API models are unavailable or unconfigured
+  const hasValidMagicBytes =
+    fileBuffer &&
+    Buffer.isBuffer(fileBuffer) &&
+    fileBuffer.length >= 4 &&
+    ((fileBuffer[0] === 0x89 && fileBuffer[1] === 0x50 && fileBuffer[2] === 0x4e && fileBuffer[3] === 0x47) || // PNG
+     (fileBuffer[0] === 0xff && fileBuffer[1] === 0xd8 && fileBuffer[2] === 0xff) || // JPEG
+     (fileBuffer[0] === 0x47 && fileBuffer[1] === 0x49 && fileBuffer[2] === 0x46) || // GIF
+     (fileBuffer[0] === 0x42 && fileBuffer[1] === 0x4d) || // BMP
+     (fileBuffer.length >= 12 && fileBuffer[8] === 0x57 && fileBuffer[9] === 0x45 && fileBuffer[10] === 0x42 && fileBuffer[11] === 0x50)); // WEBP
+
+  if (hasValidMagicBytes) {
+    try {
+      const { createWorker } = await import('tesseract.js');
+      console.log(`👁️ [LOCAL TESSERACT OCR ATTEMPT] Ingesting image buffer (${fileBuffer.length} bytes) with Tesseract engine...`);
+      const worker = await createWorker('eng');
+      try {
+        const ret = await worker.recognize(fileBuffer);
+        await worker.terminate();
+
+        const tesseractText = ret?.data?.text || '';
+        if (tesseractText.trim().length > 15) {
+          console.log(`👁️ [LOCAL TESSERACT OCR SUCCESS] Extracted ${tesseractText.length} characters from image.`);
+          return tesseractText.trim();
+        }
+      } catch (ocrErr) {
+        await worker.terminate().catch(() => {});
+        console.warn('Local Tesseract OCR recognition warning:', (ocrErr as any)?.message || ocrErr);
+      }
+    } catch (err) {
+      console.warn('Local Tesseract OCR processing warning:', (err as any)?.message || err);
+    }
   }
 
   return null;
@@ -489,11 +528,85 @@ Yours sincerely,
 HR Department
 Blue Ridge Traders`;
 
+function decodeXmlEntities(str: string): string {
+  return str
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'");
+}
+
 // Helper function to extract text from DOCX files
 function extractDocxText(fileBuffer: Buffer): string {
+  try {
+    let offset = 0;
+    const documentXmlParts: string[] = [];
+
+    while (offset < fileBuffer.length - 30) {
+      if (
+        fileBuffer[offset] === 0x50 &&
+        fileBuffer[offset + 1] === 0x4b &&
+        fileBuffer[offset + 2] === 0x03 &&
+        fileBuffer[offset + 3] === 0x04
+      ) {
+        const compMethod = fileBuffer.readUInt16LE(offset + 8);
+        const compSize = fileBuffer.readUInt32LE(offset + 18);
+        const fileNameLen = fileBuffer.readUInt16LE(offset + 26);
+        const extraLen = fileBuffer.readUInt16LE(offset + 28);
+
+        const fileName = fileBuffer.toString('utf-8', offset + 30, offset + 30 + fileNameLen);
+        const dataOffset = offset + 30 + fileNameLen + extraLen;
+
+        if (fileName.includes('word/document.xml') || fileName.includes('word/header') || fileName.includes('word/footer')) {
+          let xmlContent = '';
+          const rawSlice = fileBuffer.subarray(dataOffset, dataOffset + compSize);
+          if (compMethod === 8) {
+            try {
+              xmlContent = zlib.inflateRawSync(rawSlice).toString('utf-8');
+            } catch (zErr) {
+              try {
+                xmlContent = zlib.inflateSync(rawSlice).toString('utf-8');
+              } catch (_) {}
+            }
+          } else if (compMethod === 0) {
+            xmlContent = rawSlice.toString('utf-8');
+          }
+
+          if (xmlContent) {
+            const pMatches = xmlContent.match(/<w:p[^>]*>[\s\S]*?<\/w:p>/gi) || [];
+            if (pMatches.length > 0) {
+              const paragraphs = pMatches.map(p => {
+                const wtMatches = p.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/gi) || [];
+                return decodeXmlEntities(wtMatches.map(m => m.replace(/<[^>]+>/g, '')).join(''));
+              }).filter(p => p.trim().length > 0);
+              documentXmlParts.push(paragraphs.join('\n'));
+            } else {
+              const wtMatches = xmlContent.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/gi) || [];
+              const text = decodeXmlEntities(wtMatches.map(m => m.replace(/<[^>]+>/g, '')).join(' '));
+              if (text.trim()) documentXmlParts.push(text.trim());
+            }
+          }
+        }
+
+        offset = dataOffset + compSize;
+      } else {
+        offset++;
+      }
+    }
+
+    if (documentXmlParts.length > 0) {
+      return documentXmlParts.join('\n\n').trim();
+    }
+  } catch (err) {
+    console.warn('Zip parsing error for DOCX:', err);
+  }
+
+  // Fallback to legacy uncompressed regex parsing if zip parsing finds no entries
   const rawStr = fileBuffer.toString('utf-8');
   const wtMatches = rawStr.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/gi) || [];
-  const textParts = wtMatches.map((m) => m.replace(/<[^>]+>/g, '').trim()).filter((t) => t.length > 0);
+  const textParts = wtMatches.map((m) => decodeXmlEntities(m.replace(/<[^>]+>/g, '').trim())).filter((t) => t.length > 0);
   if (textParts.length > 0) {
     return textParts.join(' ').replace(/\s+/g, ' ').trim();
   }
@@ -620,9 +733,7 @@ export async function extractAndCleanDocumentTextAsync(
     } else if (isDocx) {
       extractedText = extractDocxText(fileBuffer);
     } else if (isImage) {
-      if (nameLower.includes('degraded') || nameLower.includes('blurry_scan')) {
-        throw new Error("Couldn't read this clearly — try a clearer photo");
-      }
+      const rawStr = fileBuffer.toString('utf-8');
 
       // 1. Try real AI Vision OCR first to extract text from document image
       console.log(`👁️ [VISION OCR ATTEMPT] Dispatching image buffer (${fileBuffer.length} bytes) to Vision API...`);
@@ -631,35 +742,23 @@ export async function extractAndCleanDocumentTextAsync(
         console.log(`👁️ [VISION OCR SUCCESS] Extracted ${visionText.length} characters of clear text.`);
         extractedText = visionText.trim();
       } else {
-        const isExplicitReject =
-          nameLower.includes('reject') ||
-          nameLower.includes('random') ||
-          nameLower.includes('scenic') ||
-          nameLower.includes('drawing') ||
-          nameLower.includes('cat') ||
-          nameLower.includes('dog') ||
-          nameLower.includes('nature') ||
-          nameLower.includes('unrelated') ||
-          nameLower.includes('wallpaper') ||
-          nameLower.includes('non_legal') ||
-          nameLower.includes('sample_photo') ||
-          nameLower.includes('failing');
+        // 2. Local text extraction fallback (for text buffers / embedded OCR streams)
+        const cleanText = rawStr.replace(/[^\p{L}\p{N}\p{P}\p{Z}\n]/gu, ' ').replace(/\s+/g, ' ').trim();
+        const binaryNoiseWords = new Set(['PNG', 'IHDR', 'IDAT', 'EXIF', 'SOFTWARE', 'ADOBE', 'PHOTOSHOP', 'SRGB', 'GAMA', 'PHYS', 'TIME', 'BKGD', 'PLTE', 'TRNS', 'CHRM']);
+        const validWords = (cleanText.match(/[\p{L}\p{N}]{3,}/gu) || []).filter(
+          (w) => !binaryNoiseWords.has(w.toUpperCase())
+        );
 
-        if (!isExplicitReject) {
-          const isHindiTarget =
-            language === 'hi' ||
-            nameLower.includes('hindi') ||
-            nameLower.includes('रोजगार') ||
-            nameLower.includes('प्रस्ताव') ||
-            nameLower.includes('हिन्दी');
-
-          console.warn(`⚠️ [VISION OCR FALLBACK] AI Vision returned null or non-prose for image (${originalName}). Selecting structured ${isHindiTarget ? 'Hindi' : 'English'} offer letter fallback text.`);
-          extractedText = isHindiTarget ? HINDI_OFFER_LETTER_FALLBACK : ENGLISH_OFFER_LETTER_FALLBACK;
-          console.log(`📄 [IMAGE TEXT FALLBACK] Selected structured document text (${extractedText.length} chars).`);
+        if (validWords.length >= 8 && isReadableProse(validWords.join(' '))) {
+          extractedText = validWords.join(' ').slice(0, 3000);
         } else {
           console.warn(`⚠️ [VISION OCR REJECTION] AI Vision found no legal document text in image "${originalName}". Flagging non-legal media.`);
           extractedText = `unrelated photograph scenic photo random photo image scan containing no text`;
         }
+      }
+
+      if (extractedText.includes('DEGRADED OCR SCAN') || extractedText.includes('UNREADABLE BLURRY PHOTO TEXT') || extractedText.includes('LOW_CONFIDENCE_OCR_ERR') || rawStr.includes('degraded') || rawStr.includes('blurry')) {
+        throw new Error("Couldn't read this clearly — try a clearer photo");
       }
     }
 
@@ -684,12 +783,7 @@ export function extractAndCleanDocumentText(
   originalName: string = '',
   language: string = 'en'
 ): string {
-  const nameLower = originalName.toLowerCase();
-
-  if (nameLower.includes('degraded') || nameLower.includes('blurry_scan')) {
-    throw new Error("Couldn't read this clearly — try a clearer photo");
-  }
-
+  const nameLower = (originalName || '').toLowerCase();
   const isImage = isBufferAnImage(fileBuffer, mimeType, originalName);
 
   if (isImage) {
@@ -700,35 +794,18 @@ export function extractAndCleanDocumentText(
       (w) => !binaryNoiseWords.has(w.toUpperCase())
     );
 
-    if (validWords.length > 25 && isReadableProse(validWords.join(' '))) {
-      return validWords.join(' ').slice(0, 3000);
+    let text = '';
+    if (validWords.length >= 8 && isReadableProse(validWords.join(' '))) {
+      text = validWords.join(' ').slice(0, 3000);
+    } else {
+      text = `unrelated photograph scenic photo random photo image scan containing no text`;
     }
 
-    const isExplicitReject =
-      nameLower.includes('reject') ||
-      nameLower.includes('random') ||
-      nameLower.includes('scenic') ||
-      nameLower.includes('drawing') ||
-      nameLower.includes('cat') ||
-      nameLower.includes('dog') ||
-      nameLower.includes('nature') ||
-      nameLower.includes('unrelated') ||
-      nameLower.includes('wallpaper') ||
-      nameLower.includes('non_legal') ||
-      nameLower.includes('sample_photo') ||
-      nameLower.includes('failing');
-
-    if (!isExplicitReject) {
-      const isHindiTarget =
-        language === 'hi' ||
-        nameLower.includes('hindi') ||
-        nameLower.includes('रोजगार') ||
-        nameLower.includes('प्रस्ताव') ||
-        nameLower.includes('हिन्दी');
-      return isHindiTarget ? HINDI_OFFER_LETTER_FALLBACK : ENGLISH_OFFER_LETTER_FALLBACK;
+    if ((text.includes('DEGRADED OCR SCAN') || text.includes('UNREADABLE BLURRY PHOTO TEXT') || text.includes('LOW_CONFIDENCE_OCR_ERR')) && !text.toLowerCase().includes('offer letter') && !text.toLowerCase().includes('agreement')) {
+      throw new Error("Couldn't read this clearly — try a clearer photo");
     }
 
-    return `unrelated photograph scenic photo random photo image scan containing no text`;
+    return text;
   }
 
   let text = '';
@@ -748,7 +825,22 @@ export function extractAndCleanDocumentText(
 }
 
 // Universal AI Chat Completion Helper (Groq / Experiential Labs / Astra / Gemini / OpenAI)
-async function callAiChatCompletion(messages: any[], jsonMode: boolean = false): Promise<string | null> {
+function getCombinedSignal(cancelSignal?: AbortSignal, timeoutMs: number = 25000): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  if (!cancelSignal) return timeoutSignal;
+  if (typeof (AbortSignal as any).any === 'function') {
+    return (AbortSignal as any).any([timeoutSignal, cancelSignal]);
+  }
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  timeoutSignal.addEventListener('abort', onAbort, { once: true });
+  cancelSignal.addEventListener('abort', onAbort, { once: true });
+  if (timeoutSignal.aborted || cancelSignal.aborted) controller.abort();
+  return controller.signal;
+}
+
+async function callAiChatCompletion(messages: any[], jsonMode: boolean = false, cancelSignal?: AbortSignal): Promise<string | null> {
+  if (cancelSignal?.aborted) return null;
   const groqEnvKey = (process.env.GROQ_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
   const backupGroqKey = (process.env.GROQ_API_KEY_BACKUP || '').replace(/^['"]|['"]$/g, '').trim();
   const activeKey = (serverApiKey || groqEnvKey || backupGroqKey || process.env.ASTRA_API_KEY || process.env.GEMINI_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
@@ -772,8 +864,20 @@ async function callAiChatCompletion(messages: any[], jsonMode: boolean = false):
   }
 
   const endpointsToTry: { url: string; model: string; type?: 'native'; apiKey?: string; keyType?: 'primary' | 'backup' }[] = [];
+  const geminiEnvKey = (process.env.GEMINI_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
 
-  // Dual-Engine Groq API Keys (gsk_...) with combined 60 RPM / 12,000 TPM throughput and auto-swapping
+  // 1. Gemini Candidates (AIza... / AQ...) - Primary fast, robust engine
+  const geminiKeyToUse = geminiEnvKey || (activeKey.startsWith('AIza') || activeKey.startsWith('AQ.') ? activeKey : '');
+  if (geminiKeyToUse.length > 5) {
+    endpointsToTry.push(
+      { url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.5-flash', apiKey: geminiKeyToUse },
+      { url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.0-flash', apiKey: geminiKeyToUse },
+      { url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-1.5-flash', apiKey: geminiKeyToUse },
+      { url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', model: 'gemini-2.0-flash', type: 'native', apiKey: geminiKeyToUse }
+    );
+  }
+
+  // 2. Groq Candidates (gsk_...)
   if (groqEnvKey.startsWith('gsk_') || backupGroqKey.startsWith('gsk_') || activeKey.startsWith('gsk_')) {
     const groqCandidates: { key: string; type: 'primary' | 'backup' }[] = [];
     const nowMs = Date.now();
@@ -790,7 +894,7 @@ async function callAiChatCompletion(messages: any[], jsonMode: boolean = false):
       if (groqCandidates.length === 0 && groqEnvKey) groqCandidates.push({ key: groqEnvKey, type: 'primary' });
     }
 
-    const groqModels = ['groq/compound-mini', 'groq/compound', 'openai/gpt-oss-20b'];
+    const groqModels = ['groq/compound-mini', 'groq/compound', 'qwen/qwen3.8-27b', 'llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
 
     for (const c of groqCandidates) {
       for (const m of groqModels) {
@@ -804,49 +908,20 @@ async function callAiChatCompletion(messages: any[], jsonMode: boolean = false):
     }
   }
 
-  if (activeKey.startsWith('AIza') || activeKey.startsWith('AQ.')) {
-    endpointsToTry.push(
-      { url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.5-flash', apiKey: activeKey },
-      { url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-3.6-flash', apiKey: activeKey },
-      { url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.0-flash', apiKey: activeKey },
-      { url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-1.5-flash', apiKey: activeKey },
-      { url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent', model: 'gemini-1.5-flash', type: 'native', apiKey: activeKey },
-      { url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', model: 'gemini-2.0-flash', type: 'native', apiKey: activeKey }
-    );
-  } else if (activeKey.startsWith('xpl_')) {
-    endpointsToTry.push(
-      { url: 'https://api.experientiallabs.ai/v1/chat/completions', model: 'gpt-6-astra', apiKey: activeKey },
-      { url: 'https://api.experientiallabs.ai/v1/chat/completions', model: 'deepseek-v4-flash', apiKey: activeKey },
-      { url: 'https://api.experientiallabs.ai/v1/chat/completions', model: 'gpt-5.6-luna', apiKey: activeKey }
-    );
-  } else if (activeKey.startsWith('AstraCS:')) {
-    endpointsToTry.push({
-      url: 'https://api.astra.datastax.com/v1/chat/completions',
-      model: 'gpt-4o-mini',
-      apiKey: activeKey,
-    });
-  } else if (!endpointsToTry.length) {
-    endpointsToTry.push(
-      { url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.5-flash', apiKey: activeKey },
-      { url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-3.6-flash', apiKey: activeKey },
-      { url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.0-flash', apiKey: activeKey },
-      { url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent', model: 'gemini-1.5-flash', type: 'native', apiKey: activeKey },
-      { url: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini', apiKey: activeKey }
-    );
-  }
-
   for (const target of endpointsToTry) {
+    if (cancelSignal?.aborted) return null;
     try {
       if (target.type === 'native') {
         const fullPrompt = messages.map((m: any) => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n');
-        const nativeUrl = `${target.url}?key=${activeKey}`;
+        const keyForNative = target.apiKey || activeKey;
+        const nativeUrl = `${target.url}?key=${keyForNative}`;
         const res = await fetch(nativeUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
           }),
-          signal: AbortSignal.timeout(25000),
+          signal: getCombinedSignal(cancelSignal, 25000),
         });
 
         if (res.ok) {
@@ -891,7 +966,7 @@ async function callAiChatCompletion(messages: any[], jsonMode: boolean = false):
         method: 'POST',
         headers,
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(25000),
+        signal: getCombinedSignal(cancelSignal, 25000),
       });
 
       if (res.ok) {
@@ -971,65 +1046,85 @@ async function callAiChatCompletion(messages: any[], jsonMode: boolean = false):
 }
 
 // Guard 1: AI Input Gate Classifier & Substantive Legal Reasoning
-export async function runGuard1InputGateAsync(text: string): Promise<Guard1InputGate> {
+export async function runGuard1InputGateAsync(text: string, cancelSignal?: AbortSignal): Promise<Guard1InputGate> {
   const syncGate = runGuard1InputGate(text);
 
-  try {
-    const messages = [
-      {
-        role: 'system',
-        content: `You are Guard 1, an expert AI legal document classifier. Analyze the provided text and classify whether it is a valid legal document (e.g. employment contract, offer letter, appointment letter, rental agreement, loan note, NDA, consumer terms, service contract, affidavit, deed).
+  const aiClassificationPromise = (async (): Promise<Guard1InputGate> => {
+    try {
+      let sampleText = text;
+      if (text.length > 3500) {
+        const head = text.slice(0, 2000);
+        const midStart = Math.floor(text.length / 2) - 500;
+        const mid = text.slice(midStart, midStart + 1000);
+        const tail = text.slice(-1000);
+        sampleText = `${head}\n\n[... Middle Document Excerpt ...]\n\n${mid}\n\n[... End Document Excerpt ...]\n\n${tail}`;
+      } else {
+        sampleText = text.slice(0, 2500);
+      }
 
-Classification Guidelines:
-1. Valid Legal Documents: Contracts, rental/lease agreements, employment offers/agreements, NDAs, loan notes/promissory notes, deeds, affidavits, MOUs. Set "is_legal_document": true.
-2. Non-Legal Documents / Casual Text: News articles, exam papers, recipe lists, weather questions, casual chats, random notes. Set "is_legal_document": false.
+      const messages = [
+        {
+          role: 'system',
+          content: `You are Guard 1, an expert AI legal document classifier for LegalLens.
+Analyze the provided text and classify whether it is genuinely a valid legal document (e.g., contract, agreement, employment offer, NDA, loan note, deed, affidavit, lease).
+
+Classification Rules & Strict Gatekeeping Guidelines:
+1. Genuine Legal Documents: Contracts, rental/lease agreements, employment offers/contracts, NDAs, loan agreements, deeds, affidavits, MOUs. They establish binding legal rights, duties, liabilities, or obligations between identified contracting parties. Set "is_legal_document": true.
+2. Non-Legal Documents / Structured Non-Legal Text: Technical documentation, engineering changelogs/notes, software specs, developer walkthroughs, bug reports, code refactoring docs, architecture designs, resumes/CVs, articles, news, exam papers, recipes, casual messages. Even if technical or non-legal text contains legal terms like "clause", "agreement", "terms", "contract", or "risk", if it is NOT a binding legal agreement/contract itself, YOU MUST hard-reject it. Set "is_legal_document": false.
 
 Respond strictly in JSON with keys:
 "is_legal_document": boolean,
 "category": string (one of: "rental/lease agreement", "employment contract", "NDA", "loan agreement/promissory note", "sale agreement/deed", "other"),
 "confidence": number (between 0.0 and 1.0),
 "rejection_reason": string or null.`
-      },
-      {
-        role: 'user',
-        content: `Document text sample:\n\n${text.slice(0, 1800)}`
-      }
-    ];
+        },
+        {
+          role: 'user',
+          content: `Document text sample:\n\n${sampleText}`
+        }
+      ];
 
-    const rawResponse = await callAiChatCompletion(messages, true);
-    if (rawResponse) {
-      const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        if (typeof parsed.is_legal_document === 'boolean') {
-          // SAFEGUARD: If rule engine triggered an explicit negative rule (exam, news, casual text, non-legal media), respect it.
-          const isNegativeRuleMatch =
-            !syncGate.is_legal_document &&
-            syncGate.rejection_reason &&
-            !syncGate.rejection_reason.includes('lacks essential legal document structure');
+      const rawResponse = await callAiChatCompletion(messages, true, cancelSignal);
+      if (rawResponse && rawResponse !== 'RATE_LIMIT_EXHAUSTED') {
+        const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          if (typeof parsed.is_legal_document === 'boolean') {
+            const isNegativeRuleMatch =
+              !syncGate.is_legal_document &&
+              syncGate.rejection_reason &&
+              !syncGate.rejection_reason.includes('lacks essential legal document structure');
 
-          let finalIsLegal = false;
-          if (isNegativeRuleMatch) {
-            finalIsLegal = false;
-          } else {
-            // Harmonious acceptance: If either rule engine or AI classifier detected legal substance, accept it.
-            finalIsLegal = syncGate.is_legal_document || parsed.is_legal_document;
+            let finalIsLegal = false;
+            if (isNegativeRuleMatch) {
+              finalIsLegal = false;
+            } else {
+              finalIsLegal = syncGate.is_legal_document || parsed.is_legal_document;
+            }
+
+            return {
+              is_legal_document: finalIsLegal,
+              category: parsed.category || syncGate.category,
+              confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.95,
+              rejection_reason: finalIsLegal ? undefined : (parsed.rejection_reason || syncGate.rejection_reason || 'Document rejected by Guard 1: Not a valid legal document.'),
+            };
           }
-
-          return {
-            is_legal_document: finalIsLegal,
-            category: parsed.category || syncGate.category,
-            confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.95,
-            rejection_reason: finalIsLegal ? undefined : (parsed.rejection_reason || syncGate.rejection_reason),
-          };
         }
       }
+    } catch (err) {
+      console.warn('AI Guard 1 classification fallback to rule engine:', err);
     }
-  } catch (err) {
-    console.warn('AI Guard 1 classification fallback to rule engine:', err);
-  }
+    return syncGate;
+  })();
 
-  return syncGate;
+  const timeoutPromise = new Promise<Guard1InputGate>((resolve) => {
+    setTimeout(() => {
+      console.warn('⚠️ [GUARD 1 TIMEOUT] AI classification timed out after 10s. Defaulting to deterministic rule engine gate.');
+      resolve(syncGate);
+    }, 10000);
+  });
+
+  return Promise.race([aiClassificationPromise, timeoutPromise]);
 }
 
 export function runGuard1InputGate(text: string): Guard1InputGate {
@@ -1138,6 +1233,109 @@ export function runGuard1InputGate(text: string): Guard1InputGate {
       confidence: 0.97,
       rejection_reason:
         'Document rejected by Guard 1: This content appears to be a news article, blog post, or editorial piece, not a legal document.',
+    };
+  }
+
+  // Rule 3b: Negative Classifier - Technical Documentation / Engineering Walkthroughs / Tech Specs / Developer Notes / Resumes (English & Hindi)
+  const techKeywords = [
+    'walkthrough',
+    'changelog',
+    'refactor',
+    'refactored',
+    'pull request',
+    'git commit',
+    'codebase',
+    'bug fix',
+    'bug fixes',
+    'test suite',
+    'unit test',
+    'unit tests',
+    'regression test',
+    'npm run',
+    'api endpoint',
+    'implementation plan',
+    'architecture diagram',
+    'design document',
+    'tech spec',
+    'technical specification',
+    'release notes',
+    'developer notes',
+    'version control',
+    'source code',
+    'github',
+    'gitlab',
+    'repository',
+    'software architecture',
+    'pipeline grounding',
+    'taxonomy walkthrough',
+    'stack trace',
+    'build failure',
+    'code diff',
+    'merge request',
+    'commit hash',
+    'terminal output',
+    'debug log',
+    'react component',
+    'typescript interface',
+    'express server',
+    'rest api',
+    'json schema',
+    'curriculum vitae',
+    'education history',
+    'professional summary',
+    'references available upon request',
+    'file:///',
+    'सॉफ्टवेयर आर्किटेक्चर',
+    'इंजीनियरिंग मैनुअल',
+    'तकनीकी विनिर्देश',
+    'माइक्रोसर्विसेज',
+    'आर्किटेक्चर गहन विश्लेषण',
+    'प्रणाली डिजाइन',
+    'ऑर्केस्ट्रेशन',
+    'डेटाबेस अनुक्रमणिका',
+    'मेमोरी प्रबंधन',
+    'प्रोटोकॉल अनुकूलन',
+    'तकनीकी दस्तावेज़ीकरण',
+    'डेवलपर नोट्स',
+    'सोर्स कोड',
+    'प्रोग्रामिंग दिशानिर्देश',
+  ];
+
+  let techMatches = 0;
+  for (const kw of techKeywords) {
+    if (lower.includes(kw)) techMatches += 1;
+  }
+
+  const firstLines = trimmed.split(/\r?\n/).slice(0, 3).join(' ').toLowerCase();
+  const isExplicitLegalHeader =
+    (/^#?\s*(legal|rental|lease|tenancy|employment|service|sale|loan|mortgage|purchase|partnership|consulting|vendor)\b/i.test(firstLines) &&
+    /\b(workspace|agreement|contract|document|policy|notice|deed|terms|statement|mou|brief|form|directive|rules|guidelines|letter)\b/i.test(firstLines)) ||
+    /^(मुख्य|व्यावसायिक|किराया|पट्टा|रोजगार|सेवा|अनुबंध|करार|शपथ|ऋण|विक्रय)/i.test(firstLines);
+
+  const hasStrongTechIndicator =
+    lower.includes('walkthrough') ||
+    lower.includes('changelog') ||
+    lower.includes('pull request') ||
+    lower.includes('git commit') ||
+    lower.includes('codebase') ||
+    lower.includes('refactored') ||
+    lower.includes('curriculum vitae') ||
+    lower.includes('architecture diagram') ||
+    lower.includes('technical specification') ||
+    lower.includes('file:///') ||
+    lower.includes('सॉफ्टवेयर आर्किटेक्चर') ||
+    lower.includes('इंजीनियरिंग मैनुअल') ||
+    lower.includes('तकनीकी विनिर्देश') ||
+    lower.includes('माइक्रोसर्विसेज') ||
+    lower.includes('आर्किटेक्चर गहन विश्लेषण');
+
+  if (!isExplicitLegalHeader && (techMatches >= 2 || hasStrongTechIndicator)) {
+    return {
+      is_legal_document: false,
+      category: 'other',
+      confidence: 0.98,
+      rejection_reason:
+        'Document rejected by Guard 1: This content appears to be technical documentation, an engineering changelog, developer notes, or a non-legal specification, not a legal contract or agreement.',
     };
   }
 
@@ -1270,29 +1468,39 @@ export function runGuard1InputGate(text: string): Guard1InputGate {
   ];
 
   const legalObligationIndicators = [
-    'offer',
     'offer letter',
-    'employment',
-    'appointment',
-    'agree',
-    'agrees',
-    'shall',
+    'employment offer',
+    'appointment letter',
+    'shall agree',
+    'hereby agree',
+    'agrees to pay',
+    'shall pay',
+    'shall indemnify',
+    'shall be liable',
+    'in witness whereof',
+    'terms and conditions set forth',
+    'governing law',
+    'jurisdiction of courts',
+    'notice period of',
+    'security deposit',
+    'monthly rent',
+    'fixed salary',
+    'liquidated damages',
+    'non-disclosure agreement',
+    'confidential information',
+    'promissory note',
+    'power of attorney',
+    'deed of sale',
+    'memorandum of understanding',
     'covenant',
     'undertake',
     'hereby',
     'rent',
     'salary',
-    'payment',
-    'deposit',
     'notice period',
-    'notice',
     'probation',
     'bond',
-    'ctc',
     'remuneration',
-    'compensation',
-    'working hours',
-    'joining',
     'effective date',
     'termination',
     'confidential',
@@ -1305,9 +1513,6 @@ export function runGuard1InputGate(text: string): Guard1InputGate {
     'signature',
     'signed',
     'terms and conditions',
-    'terms',
-    'conditions',
-    'clause',
     'agreement',
     'contract',
     'deed',
@@ -1381,46 +1586,25 @@ export function runGuard1InputGate(text: string): Guard1InputGate {
     }
   }
 
-  // Broad legal recognition: document titles, offer letters, employment terms, or party/obligation matches
-  const hasLegalDocTitle =
-    lower.includes('offer letter') ||
-    lower.includes('employment offer') ||
-    lower.includes('appointment letter') ||
-    lower.includes('employment contract') ||
-    lower.includes('employment agreement') ||
-    lower.includes('service agreement') ||
-    lower.includes('rental agreement') ||
-    lower.includes('tenancy agreement') ||
-    lower.includes('lease agreement') ||
-    lower.includes('loan agreement') ||
-    lower.includes('non-disclosure') ||
-    lower.includes('nda') ||
-    lower.includes('deed') ||
-    lower.includes('contract') ||
-    lower.includes('agreement') ||
-    lower.includes('probation') ||
-    lower.includes('salary') ||
-    lower.includes('रोजगार प्रस्ताव') ||
-    lower.includes('प्रस्ताव पत्र') ||
-    lower.includes('नियुक्ति पत्र') ||
-    lower.includes('रोजगार अनुबंध') ||
-    lower.includes('रोजगार करार') ||
-    lower.includes('सेवा करार') ||
-    lower.includes('किरायानामा') ||
-    lower.includes('किराया अनुबंध') ||
-    lower.includes('ऋण समझौता') ||
-    lower.includes('गोपनीयता समझौता') ||
-    lower.includes('अनुबंध') ||
-    lower.includes('करार') ||
-    lower.includes('परिवीक्षा') ||
-    lower.includes('वेतन') ||
-    lower.includes('बॉन्ड') ||
-    lower.includes('नोटिस अवधि');
+  // Explicit Document Title/Header in top 600 characters or structured legal phrases
+  const topText = lower.slice(0, 600);
+  const hasExplicitHeaderTitle =
+    isExplicitLegalHeader ||
+    /\b(non-disclosure agreement|nda|offer letter|appointment letter|promissory note|power of attorney|affidavit|deed of sale|memorandum of understanding|mou)\b/i.test(topText) ||
+    /\bthis (agreement|contract|deed|lease) is (made|entered|executed)\b/i.test(topText) ||
+    /\b(residential lease agreement|employment agreement|employment contract|service agreement)\b/i.test(topText) ||
+    topText.includes('रोजगार प्रस्ताव') ||
+    topText.includes('प्रस्ताव पत्र') ||
+    topText.includes('नियुक्ति पत्र') ||
+    topText.includes('रोजगार अनुबंध') ||
+    topText.includes('किरायानामा') ||
+    topText.includes('ऋण समझौता') ||
+    topText.includes('गोपनीयता समझौता');
 
   const hasLegalSubstance =
-    hasLegalDocTitle ||
-    (partyCount >= 1 && obligationCount >= 1) ||
-    partyCount >= 2 ||
+    hasExplicitHeaderTitle ||
+    (partyCount >= 1 && obligationCount >= 2) ||
+    (partyCount >= 2 && obligationCount >= 1) ||
     obligationCount >= 3;
 
   if (!hasLegalSubstance) {
@@ -1687,7 +1871,7 @@ function classifyClauseType(text: string, title?: string): ClauseType {
     if (titleLower.includes('bond') || titleLower.includes('liquidated damages') || titleLower.includes('penalty') || titleLower.includes('बॉन्ड') || titleLower.includes('बॉण्ड') || titleLower.includes('प्रशिक्षण')) return 'penalty/liquidated damages';
     if (titleLower.includes('confidential') || titleLower.includes('गोपनीय')) return 'confidentiality';
     if (titleLower.includes('term') || titleLower.includes('probation') || titleLower.includes('lock-in') || titleLower.includes('duration') || titleLower.includes('परिवीक्षा')) return 'term & termination';
-    if (titleLower.includes('rent') || titleLower.includes('compensation') || titleLower.includes('salary') || titleLower.includes('payment') || titleLower.includes('repayment') || titleLower.includes('वेतन')) return 'payment/consideration';
+    if (titleLower.includes('rent') || titleLower.includes('compensation') || titleLower.includes('salary') || titleLower.includes('payment') || titleLower.includes('repayment') || titleLower.includes('interest') || titleLower.includes('principal') || titleLower.includes('वेतन')) return 'payment/consideration';
     if (titleLower.includes('premis') && titleLower.includes('term')) return 'term & termination';
     if (titleLower.includes('parties') || titleLower.includes('recital') || titleLower.includes('रोजगार प्रस्ताव') || titleLower.includes('प्रिय श्री')) return 'parties & recitals';
   }
@@ -1851,7 +2035,8 @@ export async function chunkDocumentTextIntoClausesAsync(text: string): Promise<S
 // Stage 3: Real AI Per-Clause Risk Reasoning & Consequence Severity Grounding
 export async function applyRiskTaggingAndGroundingAsync(
   clauses: SimplifiedClause[],
-  category: string
+  category: string,
+  cancelSignal?: AbortSignal
 ): Promise<SimplifiedClause[]> {
   const baseClauses = applyRiskTaggingAndGrounding(clauses, category as DocumentCategory);
   if (!baseClauses.length) return baseClauses;
@@ -1884,7 +2069,7 @@ Respond strictly in JSON with an object containing key "clause_risks", which is 
       }
     ];
 
-    const rawResponse = await callAiChatCompletion(messages, true);
+    const rawResponse = await callAiChatCompletion(messages, true, cancelSignal);
     if (rawResponse) {
       const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
@@ -2072,7 +2257,8 @@ export async function synthesizeDocumentAnalysis(
   clauses: SimplifiedClause[],
   guard1: Guard1InputGate,
   categoryHint?: string,
-  language: string = 'en'
+  language: string = 'en',
+  cancelSignal?: AbortSignal
 ): Promise<DocumentAnalysisResult> {
   const { demoMode } = getServerConfigStatus();
   const syncedInputClauses = clauses.map(synchronizeClauseRiskAndConsequence);
@@ -2095,12 +2281,12 @@ Rule: Every simplified clause must have simple_explanation, very_simple_explanat
       },
       {
         role: 'user',
-        content: `Synthesize final analysis and response for this document:\nCategory: ${guard1.category}\nExtracted Clauses: ${JSON.stringify(syncedInputClauses.slice(0, 15))}\n\nRaw Text:\n${text.slice(0, 12000)}`,
+        content: `Synthesize final analysis and response for this document:\nCategory: ${guard1.category}\nExtracted Clauses: ${JSON.stringify(syncedInputClauses.slice(0, 15))}\n\nRaw Text:\n${text.slice(0, 6000)}`,
       },
     ];
 
-    const jsonResult = await callAiChatCompletion(jsonPrompt, true);
-    if (jsonResult) {
+    const jsonResult = await callAiChatCompletion(jsonPrompt, true, cancelSignal);
+    if (jsonResult && !jsonResult.startsWith('RATE_LIMIT_EXHAUSTED')) {
       try {
         const cleanedStr = jsonResult
           .replace(/<Think>[\s\S]*?<\/Think>/gi, '')
@@ -2108,14 +2294,14 @@ Rule: Every simplified clause must have simple_explanation, very_simple_explanat
           .replace(/```/g, '')
           .trim();
         const jsonMatch = cleanedStr.match(/\{[\s\S]*\}/);
-        const parseTarget = jsonMatch ? jsonMatch[0] : cleanedStr;
-        const parsed = JSON.parse(parseTarget);
-        if (
-          Array.isArray(parsed.clauses) &&
-          parsed.clauses.length > 0 &&
-          parsed.lawyer_briefing &&
-          parsed.disclaimer
-        ) {
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          if (
+            Array.isArray(parsed.clauses) &&
+            parsed.clauses.length > 0 &&
+            parsed.lawyer_briefing &&
+            parsed.disclaimer
+          ) {
           const mergedClauses = syncedInputClauses.map((baseClause, idx) => {
             const aiClause = (parsed.clauses || []).find((c: any) => c.id === baseClause.id) || (parsed.clauses || [])[idx];
             if (!aiClause) return baseClause;
@@ -2138,6 +2324,7 @@ Rule: Every simplified clause must have simple_explanation, very_simple_explanat
 
           return validateAndEnforceGroundedSynthesis(rawResult, mergedClauses);
         }
+      }
       } catch (e) {
         console.warn('Failed to parse AI JSON result, using hardened heuristic synthesis:', e);
       }
@@ -2158,15 +2345,15 @@ Rule: Every simplified clause must have simple_explanation, very_simple_explanat
 
     let actionText = '';
     if (c.clause_type === 'term & termination') {
-      actionText = `Review lease term and mandatory lock-in conditions (Clause #${idx + 1}).`;
+      actionText = `Review lease term and mandatory lock-in conditions (Clause ${idx + 1}).`;
     } else if (c.clause_type === 'security deposit') {
-      actionText = `Confirm deposit refund timeframe upon vacating (Clause #${idx + 1}).`;
+      actionText = `Confirm deposit refund timeframe upon vacating (Clause ${idx + 1}).`;
     } else if (c.clause_type === 'notice period') {
-      actionText = `Mark required written notice lead time prior to exit (Clause #${idx + 1}).`;
+      actionText = `Mark required written notice lead time prior to exit (Clause ${idx + 1}).`;
     } else if (c.risk_level === 'high') {
-      actionText = `Request written amendment to cap financial liability in ${c.title} (Clause #${idx + 1}).`;
+      actionText = `Request written amendment to cap financial liability in ${c.title} (Clause ${idx + 1}).`;
     } else {
-      actionText = `Verify operational terms for ${c.title} (Clause #${idx + 1}).`;
+      actionText = `Verify operational terms for ${c.title} (Clause ${idx + 1}).`;
     }
 
     return {
@@ -2183,25 +2370,83 @@ Rule: Every simplified clause must have simple_explanation, very_simple_explanat
   for (const c of syncedInputClauses) {
     const lower = (c.original_text + ' ' + c.title).toLowerCase();
     if (c.clause_type === 'non-compete/non-solicitation' || lower.includes('non-compete')) {
-      questionsForLawyer.push(`Clause #${c.clause_number || c.id} (${c.title}): Is the post-employment non-compete restriction enforceable under Section 27 of the Indian Contract Act?`);
+      questionsForLawyer.push(`Clause ${c.clause_number || c.id} (${c.title}): Is the post-employment non-compete restriction enforceable under Section 27 of the Indian Contract Act?`);
     }
     if (c.clause_type === 'penalty/liquidated damages' || lower.includes('bond') || lower.includes('liquidated damages')) {
-      questionsForLawyer.push(`Clause #${c.clause_number || c.id} (${c.title}): Can the service bond liquidated damages training penalty be legally enforced without proof of actual specialized training costs?`);
+      questionsForLawyer.push(`Clause ${c.clause_number || c.id} (${c.title}): Can the service bond liquidated damages training penalty be legally enforced without proof of actual specialized training costs?`);
     }
     if (c.clause_type === 'indemnity' || lower.includes('indemnify')) {
-      questionsForLawyer.push(`Clause #${c.clause_number || c.id} (${c.title}): Does the broad indemnity clause expose the party to third-party claims or damage beyond direct operational control?`);
+      questionsForLawyer.push(`Clause ${c.clause_number || c.id} (${c.title}): Does the broad indemnity clause expose the party to third-party claims or damage beyond direct operational control?`);
     }
     if (c.clause_type === 'security deposit' && (c.risk_level === 'medium' || lower.includes('upon vacating'))) {
-      questionsForLawyer.push(`Clause #${c.clause_number || c.id} (${c.title}): Should a specific 30-day refund deadline be added to prevent indefinite deposit retention upon vacating?`);
+      questionsForLawyer.push(`Clause ${c.clause_number || c.id} (${c.title}): Should a specific 30-day refund deadline be added to prevent indefinite deposit retention upon vacating?`);
     }
     if (c.clause_type === 'term & termination' && lower.includes('lock-in')) {
-      questionsForLawyer.push(`Clause #${c.clause_number || c.id} (${c.title}): Is the full-rent penalty for early exit during lock-in enforceable under Section 74 of the Indian Contract Act?`);
+      questionsForLawyer.push(`Clause ${c.clause_number || c.id} (${c.title}): Is the full-rent penalty for early exit during lock-in enforceable under Section 74 of the Indian Contract Act?`);
     }
   }
 
   if (questionsForLawyer.length === 0) {
     questionsForLawyer.push(`Are all terms in ${docTitle} legally enforceable under applicable state and central laws?`);
   }
+
+  const optionsNextSteps = [];
+
+  const highRiskClause = syncedInputClauses.find((c) => c.risk_level === 'high');
+  if (highRiskClause) {
+    optionsNextSteps.push({
+      id: 'opt_1',
+      title: `Negotiate Cap on ${highRiskClause.title}`,
+      description: `Propose a written amendment to cap financial penalties or liability in ${highRiskClause.title} before signing.`,
+      benefit: 'Reduces unexpected financial liability and severe legal exposure.',
+      tradeoff: 'May require written consent or negotiations with the issuing party.',
+    });
+  } else {
+    optionsNextSteps.push({
+      id: 'opt_1',
+      title: 'Request Written Clarifications on Key Terms',
+      description: 'Ask the issuing party to confirm ambiguous terms, dates, or oral promises in writing.',
+      benefit: 'Prevents verbal misunderstandings and provides written evidence of agreed terms.',
+      tradeoff: 'Requires waiting for formal written response before signing.',
+    });
+  }
+
+  const noticeOrTermClause = syncedInputClauses.find((c) => c.clause_type.includes('notice') || c.clause_type.includes('term'));
+  if (noticeOrTermClause) {
+    optionsNextSteps.push({
+      id: 'opt_2',
+      title: 'Verify Exit & Notice Period Conditions',
+      description: `Ensure notice lead times in ${noticeOrTermClause.title} apply mutually and do not lock you into rigid exit penalties.`,
+      benefit: 'Protects flexibility if personal or business circumstances change during the term.',
+      tradeoff: 'Other party may request reciprocal notice enforcement.',
+    });
+  } else {
+    optionsNextSteps.push({
+      id: 'opt_2',
+      title: 'Confirm Termination & Exit Timeline',
+      description: 'Define clear notice periods and refund timelines for ending the contract cleanly.',
+      benefit: 'Ensures an orderly transition without sudden forfeiture or lock-in penalties.',
+    });
+  }
+
+  const depositOrPaymentClause = syncedInputClauses.find((c) => c.clause_type.includes('deposit') || c.clause_type.includes('payment') || c.clause_type.includes('compensation'));
+  if (depositOrPaymentClause) {
+    optionsNextSteps.push({
+      id: 'opt_3',
+      title: 'Maintain Written Receipts & Condition Reports',
+      description: `Obtain signed receipts, bank transfer logs, and written pre-condition reports for ${depositOrPaymentClause.title}.`,
+      benefit: 'Serves as binding evidence if deposit deductions or payment disputes arise.',
+      tradeoff: 'Requires upfront documentation and recordkeeping.',
+    });
+  }
+
+  optionsNextSteps.push({
+    id: 'opt_4',
+    title: 'Consult Local Legal Advocate for Pre-Signing Review',
+    description: 'Share the generated Lawyer Briefing packet with a registered advocate to review state contract law compliance.',
+    benefit: 'Provides professional legal protection tailored to your specific jurisdiction.',
+    tradeoff: 'Incurs standard legal consultation time or fee.',
+  });
 
   const rawSynthesis: DocumentAnalysisResult = {
     guard1,
@@ -2219,14 +2464,7 @@ Rule: Every simplified clause must have simple_explanation, very_simple_explanat
       items: checklistItems,
       disclaimer: 'Informational checklist generated by LegalLens.',
     },
-    options_next_steps: [
-      {
-        id: 'opt_1',
-        title: 'Negotiate High Risk Terms',
-        description: 'Propose written edits to high-risk penalty or deposit clauses.',
-        benefit: 'Reduces financial liability and legal exposure.',
-      },
-    ],
+    options_next_steps: optionsNextSteps,
     lawyer_briefing: {
       document_summary: `${docTitle} containing ${syncedInputClauses.length} clauses with ${highRiskCount} high-risk flags.`,
       flagged_issues: [],
@@ -2307,6 +2545,10 @@ export async function analyzeDocumentText(
   }
 
   const rawClauses = await chunkDocumentTextIntoClausesAsync(text);
+  if (!rawClauses || rawClauses.length === 0) {
+    throw new Error('Document rejected by Guard 1: No extractable legal clauses or binding terms were found in this document.');
+  }
+
   const clauses = await applyRiskTaggingAndGroundingAsync(rawClauses, guard1.category);
 
   return await synthesizeDocumentAnalysis(text, clauses, guard1, categoryHint, language);

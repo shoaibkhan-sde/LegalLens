@@ -51,6 +51,8 @@ export const HeroHeader: React.FC = () => {
             onContextMenu={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
             onDoubleClick={(e) => e.preventDefault()}
+            onTouchStart={(e) => e.preventDefault()}
+            onTouchMove={(e) => e.preventDefault()}
             className="w-full h-auto max-w-xs sm:max-w-md lg:max-w-lg object-contain hidden min-[380px]:block mx-auto select-none pointer-events-none"
           />
         </div>

@@ -170,6 +170,8 @@ export const LegalAidLocator: React.FC = () => {
               onContextMenu={(e) => e.preventDefault()}
               onMouseDown={(e) => e.preventDefault()}
               onDoubleClick={(e) => e.preventDefault()}
+              onTouchStart={(e) => e.preventDefault()}
+              onTouchMove={(e) => e.preventDefault()}
               className={`w-full h-auto max-w-xs sm:max-w-sm object-contain mx-auto select-none pointer-events-none transition-opacity duration-300 ${isIllustrationLoaded ? 'opacity-100' : 'opacity-0'
                 }`}
             />
@@ -181,17 +183,23 @@ export const LegalAidLocator: React.FC = () => {
           <div className="relative">
             <Search className="w-3.5 h-3.5 text-[#6E6659] absolute left-3 top-2.5" />
             <input
+              id="legal-aid-search"
+              name="legalAidSearch"
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={t('legal_aid.search_placeholder')}
+              aria-label={t('legal_aid.search_placeholder')}
               className="w-full bg-[#F6F1E7] border border-[#E7E1D3] rounded-lg pl-8 pr-3.5 py-2 text-xs text-[#1E1B17] focus:outline-none focus:border-[#B85C38]"
             />
           </div>
 
           <select
+            id="legal-aid-state-select"
+            name="legalAidState"
             value={selectedState}
             onChange={(e) => setSelectedState(e.target.value)}
+            aria-label={t('legal_aid.all_states')}
             className="bg-[#F6F1E7] border border-[#E7E1D3] rounded-lg px-3 py-2 text-xs text-[#1E1B17] focus:outline-none focus:border-[#B85C38]"
           >
             <option value="All">{t('legal_aid.all_states')}</option>
@@ -220,6 +228,8 @@ export const LegalAidLocator: React.FC = () => {
               onContextMenu={(e) => e.preventDefault()}
               onMouseDown={(e) => e.preventDefault()}
               onDoubleClick={(e) => e.preventDefault()}
+              onTouchStart={(e) => e.preventDefault()}
+              onTouchMove={(e) => e.preventDefault()}
               className={`w-24 h-24 object-contain mx-auto select-none pointer-events-none transition-opacity duration-300 ${isEmptyStateLoaded ? 'opacity-100' : 'opacity-0'
                 }`}
             />

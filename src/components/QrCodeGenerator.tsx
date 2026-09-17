@@ -128,7 +128,7 @@ export const QrCodeGenerator: React.FC<QrCodeGeneratorProps> = ({
       drawFinderEye(moduleCount - 7, 0); // Bottom-Left
 
       // 4. Draw Center LegalLens Brand Badge with Scale Icon
-      const badgeSize = canvasWidth * 0.22;
+      const badgeSize = canvasWidth * 0.16;
       const badgeX = (canvasWidth - badgeSize) / 2;
       const badgeY = (canvasWidth - badgeSize) / 2;
 

@@ -193,7 +193,9 @@
     "step_tagging": "Risk Tagging",
     "step_tagging_desc": "Identifying red/yellow risk flags",
     "step_synthesis": "AI Synthesis",
-    "step_synthesis_desc": "Generating checklist & lawyer brief"
+    "step_synthesis_desc": "Generating checklist & lawyer brief",
+    "btn_cancel": "Cancel Analysis",
+    "btn_cancel_desc": "Stop processing and return to document capture"
   },
   "outputs": {
     "title": "Actionable Outputs & Next Steps",
@@ -214,5 +216,21 @@
     "consequence": "Consequence",
     "copy_btn": "Copy Share Card",
     "copied_btn": "Copied to Clipboard"
+  },
+  "landing": {
+    "headline": "Understand any legal document in plain words.",
+    "subline": "Upload a contract, lease, or agreement. Get a plain-language explanation, risk warnings, and key questions to ask before signing.",
+    "cta_primary": "Analyze a document",
+    "cta_secondary": "See how it works",
+    "how_it_works_title": "Three simple ways to start",
+    "path_upload_title": "Upload a file",
+    "path_upload_desc": "PDF, Word document, image scan, or text file",
+    "path_camera_title": "Snap a photo",
+    "path_camera_desc": "Use your phone camera to capture paper pages",
+    "path_paste_title": "Paste text directly",
+    "path_paste_desc": "Copy and paste agreement clauses directly into the app",
+    "trust_1": "Grounded in your actual document text, never invented",
+    "trust_2": "Helps you understand and prepare — does not replace a lawyer",
+    "trust_3": "Processed securely in memory and never stored permanently"
   }
 }

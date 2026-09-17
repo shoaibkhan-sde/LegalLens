@@ -577,7 +577,7 @@ export const RoboAiAssistant: React.FC<RoboAiAssistantProps> = ({
                         className="text-[10px] bg-[#FBF8F1] hover:bg-[#E7E1D3]/60 text-[#B85C38] px-2 py-0.5 rounded border border-[#E7E1D3] font-semibold flex items-center space-x-1"
                       >
                         <Search className="w-2.5 h-2.5 text-[#065F46]" />
-                        <span>Clause #{cid.replace(/[^\d]/g, '') || cid}</span>
+                        <span>Clause {cid.replace(/[^\d]/g, '') || cid}</span>
                       </button>
                     ))}
                   </div>
@@ -642,12 +642,17 @@ export const RoboAiAssistant: React.FC<RoboAiAssistantProps> = ({
         </button>
 
         <input
+          id="robo-assistant-input"
+          name="assistantQuery"
           type="text"
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
           placeholder={
             isListening ? (language === 'hi' ? 'आवाज़ सुन रहे हैं...' : 'Listening to voice...') : t('robo.inputPlaceholder')
+          }
+          aria-label={
+            isListening ? (language === 'hi' ? 'आवाज़ सुन रहे हैं' : 'Listening to voice') : t('robo.inputPlaceholder')
           }
           className="flex-1 bg-[#FBF8F1] border border-[#E7E1D3] rounded-lg px-3 py-2 text-xs text-[#1E1B17] focus:outline-none focus:border-[#B85C38]"
         />

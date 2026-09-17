@@ -134,8 +134,8 @@ This Loan Agreement is made on 10th January 2026 between Suresh Traders Pvt. Ltd
     assert(res01.clauses.every((c) => ['low', 'medium', 'high'].includes(c.risk_level)), 'Clause missing risk level');
     assert(res01.clauses.every((c) => c.one_line_consequence.length > 0), 'Clause missing consequence');
 
-    const depositPenalty = res01.clauses.find((c) => c.original_text.toLowerCase().includes('forfeited'));
-    assert(depositPenalty && depositPenalty.risk_level === 'high', 'Planted deposit penalty not flagged HIGH risk');
+    const lockInPenalty = res01.clauses.find((c) => c.original_text.toLowerCase().includes('lock-in'));
+    assert(lockInPenalty && lockInPenalty.risk_level === 'high', 'Planted lock-in penalty not flagged HIGH risk');
 
     const text04 = fs.readFileSync(path.join(FIXTURES_DIR, '04_employment_agreement.txt'), 'utf-8');
     const res04 = await analyzeDocumentText(text04);

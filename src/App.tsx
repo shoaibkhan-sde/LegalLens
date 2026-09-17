@@ -96,10 +96,10 @@ function AppContent() {
   };
 
   const getBaseStickyTop = () => {
-    if (typeof window === 'undefined') return 168;
+    if (typeof window === 'undefined') return 76;
     const w = window.innerWidth;
-    if (w < 640) return 176;
-    return 168;
+    if (w < 640) return 72;
+    return 76;
   };
 
   const [baseStickyTop, setBaseStickyTop] = useState(getBaseStickyTop());
@@ -162,7 +162,42 @@ function AppContent() {
     });
   };
 
+  const activeRequestIdRef = useRef<number>(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const handleCancelAnalysis = () => {
+    // 1. Invalidate current request token so late-arriving SSE callbacks are discarded
+    activeRequestIdRef.current += 1;
+
+    // 2. Abort active HTTP fetch request immediately
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+
+    // 3. Immediately reset UI & progress state
+    setIsLoading(false);
+    setPipelineProgress({
+      activeStep: 0,
+      stepStatuses: ['pending', 'pending', 'pending', 'pending', 'pending'],
+      elapsedMs: {},
+    });
+    setDocumentAnalysis(null);
+    setErrorMessage(null);
+    setActiveClauseId(null);
+  };
+
   const handleAnalyzeText = async (text: string, file?: File) => {
+    // Increment request token and create new AbortController
+    activeRequestIdRef.current += 1;
+    const currentReqId = activeRequestIdRef.current;
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setIsLoading(true);
     setDocumentAnalysis(null);
     setErrorMessage(null);
@@ -174,36 +209,52 @@ function AppContent() {
     });
 
     try {
-      const result = await ApiClient.analyzeDocument(text, file, undefined, (stageIndex, status, elapsedMs) => {
-        setPipelineProgress((prev) => {
-          const nextStatuses = [...prev.stepStatuses];
-          if (stageIndex >= 0 && stageIndex < 5) {
-            nextStatuses[stageIndex] = status;
-          }
-          const nextActive = status === 'in_progress'
-            ? stageIndex
-            : (status === 'completed' && stageIndex < 4 ? stageIndex + 1 : prev.activeStep);
-          const nextElapsed = { ...prev.elapsedMs };
-          if (elapsedMs !== undefined && stageIndex >= 0) {
-            nextElapsed[stageIndex] = elapsedMs;
-          }
-          return {
-            activeStep: nextActive,
-            stepStatuses: nextStatuses,
-            elapsedMs: nextElapsed,
-          };
-        });
-      });
+      const result = await ApiClient.analyzeDocument(
+        text,
+        file,
+        undefined,
+        (stageIndex, status, elapsedMs) => {
+          if (currentReqId !== activeRequestIdRef.current) return;
+
+          setPipelineProgress((prev) => {
+            if (!prev) return null as any;
+            const nextStatuses = [...prev.stepStatuses];
+            if (stageIndex >= 0 && stageIndex < 5) {
+              nextStatuses[stageIndex] = status;
+            }
+            const nextActive = status === 'in_progress'
+              ? stageIndex
+              : (status === 'completed' && stageIndex < 4 ? stageIndex + 1 : prev.activeStep);
+            const nextElapsed = { ...prev.elapsedMs };
+            if (elapsedMs !== undefined && stageIndex >= 0) {
+              nextElapsed[stageIndex] = elapsedMs;
+            }
+            return {
+              activeStep: nextActive,
+              stepStatuses: nextStatuses,
+              elapsedMs: nextElapsed,
+            };
+          });
+        },
+        controller.signal
+      );
+
+      if (currentReqId !== activeRequestIdRef.current) return;
+
       setDocumentAnalysis(result);
       if (result.clauses && result.clauses.length > 0) {
         setActiveClauseId(result.clauses[0].id);
       }
     } catch (err: any) {
+      if (currentReqId !== activeRequestIdRef.current || err.message === 'CANCELED_BY_USER') {
+        return;
+      }
+
       const msg = err.message || 'System is busy, please try again in a moment.';
       setErrorMessage(msg);
 
-      // Mark the active step as failed so VisualProgress stays visible and highlights the failed step!
       setPipelineProgress((prev) => {
+        if (!prev) return null as any;
         const nextStatuses = [...prev.stepStatuses];
         const failedIdx = prev.activeStep >= 0 && prev.activeStep < 5 ? prev.activeStep : 0;
         nextStatuses[failedIdx] = 'failed';
@@ -213,7 +264,9 @@ function AppContent() {
         };
       });
     } finally {
-      setIsLoading(false);
+      if (currentReqId === activeRequestIdRef.current) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -295,6 +348,7 @@ function AppContent() {
                   onAnalyzeText={handleAnalyzeText}
                   isLoading={isLoading}
                   onInputContextChange={setActiveInputContext}
+                  onCancelAnalysis={handleCancelAnalysis}
                 />
               </div>
 
@@ -322,12 +376,178 @@ function AppContent() {
                 stepStatuses={pipelineProgress.stepStatuses}
                 elapsedMs={pipelineProgress.elapsedMs}
                 errorMessage={errorMessage}
+                onCancel={handleCancelAnalysis}
               />
             )}
 
             {/* Document Analysis Dashboard Workspace */}
             {documentAnalysis && !isLoading && (
               <div className="space-y-6">
+                {/* Responsive Multi-Pane Grid Layout */}
+                {/* Desktop: 2-Column Multi-pane workspace | Mobile: Stacked 1-thing-at-a-time */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                  {/* Left Column: Sticky Original Document Viewer with Tap-to-Verify */}
+                  <div
+                    className="lg:col-span-5 lg:sticky self-start h-[440px] transition-all duration-300"
+                    style={{ top: `${baseStickyTop}px` }}
+                  >
+                    <DocumentViewer
+                      documentTitle={documentAnalysis.document_title}
+                      category={documentAnalysis.category}
+                      clauses={documentAnalysis.clauses || []}
+                      highlightedClauseId={highlightedClauseId || activeClauseId}
+                      onClauseSelect={handleVerifyInDocument}
+                    />
+                  </div>
+
+                  {/* Right Column: Single Active Card View with Synced Navigation */}
+                  {(() => {
+                    const clausesList = documentAnalysis.clauses || [];
+                    const activeIndex = Math.max(
+                      0,
+                      clausesList.findIndex((c) => c.id === (activeClauseId || highlightedClauseId))
+                    );
+                    const activeClause = clausesList[activeIndex] || clausesList[0];
+
+                    return (
+                      <div
+                        className="lg:col-span-7 lg:sticky self-start space-y-4 transition-all duration-300"
+                        style={{ top: `${baseStickyTop}px` }}
+                      >
+                        {/* Control & Quick Jump Deck Bar */}
+                        <div className="bg-[#FBF8F1]/95 backdrop-blur-md px-4 py-3 border-2 border-[#E7E1D3] rounded-[24px] shadow-md space-y-2.5">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center space-x-2 min-w-0">
+                              <h3 className="text-sm font-extrabold font-heading text-[#1E1B17] flex items-center space-x-2 shrink-0">
+                                <Layers className="w-4 h-4 text-[#B85C38]" />
+                                <span>Extracted Clauses ({clausesList.length})</span>
+                              </h3>
+                              {clausesList.length > 0 && (
+                                <span className="text-[11px] font-mono font-bold bg-[#E7E1D3] text-[#1E1B17] px-2 py-0.5 rounded-full shrink-0">
+                                  {activeIndex + 1} of {clausesList.length}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center space-x-2 shrink-0">
+                              {/* Prev / Next Clause Quick Controls with Disabled States at Ends */}
+                              {clausesList.length > 1 && (
+                                <div className="flex items-center space-x-1 bg-[#F6F1E7] p-1 rounded-full border border-[#E7E1D3] shadow-2xs">
+                                  <button
+                                    onClick={() => {
+                                      if (activeIndex > 0) {
+                                        handleVerifyInDocument(clausesList[activeIndex - 1].id, activeIndex - 1);
+                                      }
+                                    }}
+                                    disabled={activeIndex === 0}
+                                    className={`p-1 rounded-full transition-colors ${activeIndex === 0
+                                      ? 'opacity-30 cursor-not-allowed text-[#6E6659]/50'
+                                      : 'hover:bg-[#E7E1D3] text-[#1E1B17] cursor-pointer'
+                                      }`}
+                                    title={activeIndex === 0 ? 'No previous clause' : 'Previous Clause'}
+                                  >
+                                    <ChevronLeft className="w-4 h-4" />
+                                  </button>
+                                  <span className="text-[11px] font-mono font-extrabold px-1.5 text-[#6E6659]">
+                                    {activeIndex + 1}/{clausesList.length}
+                                  </span>
+                                  <button
+                                    onClick={() => {
+                                      if (activeIndex < clausesList.length - 1) {
+                                        handleVerifyInDocument(clausesList[activeIndex + 1].id, activeIndex + 1);
+                                      }
+                                    }}
+                                    disabled={activeIndex === clausesList.length - 1}
+                                    className={`p-1 rounded-full transition-colors ${activeIndex === clausesList.length - 1
+                                      ? 'opacity-30 cursor-not-allowed text-[#6E6659]/50'
+                                      : 'hover:bg-[#E7E1D3] text-[#1E1B17] cursor-pointer'
+                                      }`}
+                                    title={activeIndex === clausesList.length - 1 ? 'No next clause' : 'Next Clause'}
+                                  >
+                                    <ChevronRight className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              )}
+
+                              {/* Contextual Reading-Level Switcher Capsule */}
+                              <div className="flex items-center bg-[#F6F1E7] p-1 rounded-full border border-[#E7E1D3] shadow-xs">
+                                <button
+                                  onClick={() => setReadingLevel('simple')}
+                                  title="Plain language explanation"
+                                  className={`flex items-center space-x-1 px-3 py-1 rounded-full text-xs font-bold transition-all duration-200 ${readingLevel === 'simple'
+                                    ? 'bg-[#FBF8F1] text-[#1E1B17] shadow-xs border border-[#E7E1D3]'
+                                    : 'text-[#6E6659] hover:text-[#1E1B17]'
+                                    }`}
+                                >
+                                  <Zap className="w-3.5 h-3.5 text-[#B85C38]" />
+                                  <span>Simple</span>
+                                </button>
+                                <button
+                                  onClick={() => setReadingLevel('very_simple')}
+                                  title="Ultra-simple plain everyday language"
+                                  className={`flex items-center space-x-1 px-3 py-1 rounded-full text-xs font-bold transition-all duration-200 ${readingLevel === 'very_simple'
+                                    ? 'bg-[#FBF8F1] text-[#1E1B17] shadow-xs border border-[#E7E1D3]'
+                                    : 'text-[#6E6659] hover:text-[#1E1B17]'
+                                    }`}
+                                >
+                                  <Sparkles className="w-3.5 h-3.5 text-[#B85C38]" />
+                                  <span>Ultra Simple</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Quick Deck Jump Bar for instant clause access with auto-scrolling refs */}
+                          {clausesList.length > 1 && (
+                            <div
+                              ref={deckJumpContainerRef}
+                              className="flex items-center space-x-1.5 overflow-x-auto py-2 px-1.5 no-scrollbar text-xs scroll-smooth my-0.5"
+                            >
+                              <span className="text-[10px] font-bold text-[#6E6659] uppercase tracking-wider shrink-0 pr-1">
+                                Deck Jump:
+                              </span>
+                              {clausesList.map((c, i) => (
+                                <button
+                                  key={`deck-jump-${c.id}`}
+                                  ref={(el) => {
+                                    deckJumpPillRefs.current[i] = el;
+                                  }}
+                                  onClick={() => handleVerifyInDocument(c.id, i)}
+                                  className={`px-2.5 py-1 rounded-full border text-[11px] font-semibold shrink-0 transition-all cursor-pointer shadow-2xs active:scale-95 my-0.5 ${i === activeIndex
+                                    ? 'bg-[#B85C38] text-white border-[#B85C38] font-bold ring-2 ring-[#B85C38]/30 scale-105'
+                                    : 'bg-[#F6F1E7] hover:bg-[#B85C38] hover:text-white border-[#E7E1D3] text-[#1E1B17]'
+                                    }`}
+                                >
+                                  {i + 1} {c.clause_type}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Single Active Card View Runway (Non-clipping padding) */}
+                        {activeClause && (
+                          <div
+                            id="active-clause-card-container"
+                            key={activeClause.id}
+                            className="animate-fade-in-up transition-all duration-300 pb-6 mb-4"
+                          >
+                            <ClauseCard
+                              clause={activeClause}
+                              index={activeIndex}
+                              totalCards={clausesList.length}
+                              readingLevel={readingLevel}
+                              onVerifyInDocument={handleVerifyInDocument}
+                              onOpenShareModal={setSelectedShareClause}
+                              isActive={true}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+
                 {/* Summary Overview Banner */}
                 <div className="bg-[#FBF8F1] border border-[#E7E1D3] rounded-2xl p-5 md:p-6 shadow-xs space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E7E1D3] pb-3">
@@ -381,168 +601,6 @@ function AppContent() {
                   </p>
                 </div>
 
-                {/* Responsive Multi-Pane Grid Layout */}
-                {/* Desktop: 2-Column Multi-pane workspace | Mobile: Stacked 1-thing-at-a-time */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                  {/* Left Column: Sticky Original Document Viewer with Tap-to-Verify */}
-                  <div
-                    className="lg:col-span-5 lg:sticky self-start h-[440px] transition-all duration-300"
-                    style={{ top: `${baseStickyTop}px` }}
-                  >
-                    <DocumentViewer
-                      documentTitle={documentAnalysis.document_title}
-                      category={documentAnalysis.category}
-                      clauses={documentAnalysis.clauses || []}
-                      highlightedClauseId={highlightedClauseId || activeClauseId}
-                      onClauseSelect={handleVerifyInDocument}
-                    />
-                  </div>
-
-                  {/* Right Column: Single Active Card View with Synced Navigation */}
-                  {(() => {
-                    const clausesList = documentAnalysis.clauses || [];
-                    const activeIndex = Math.max(
-                      0,
-                      clausesList.findIndex((c) => c.id === (activeClauseId || highlightedClauseId))
-                    );
-                    const activeClause = clausesList[activeIndex] || clausesList[0];
-
-                    return (
-                      <div className="lg:col-span-7 space-y-4">
-                        {/* Sticky Control & Quick Jump Deck Bar */}
-                        <div className="sticky top-14 sm:top-16 z-30 bg-[#FBF8F1]/95 backdrop-blur-md px-4 py-3 border-2 border-[#E7E1D3] rounded-[24px] shadow-md space-y-2.5">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="flex items-center space-x-2 min-w-0">
-                              <h3 className="text-sm font-extrabold font-heading text-[#1E1B17] flex items-center space-x-2 shrink-0">
-                                <Layers className="w-4 h-4 text-[#B85C38]" />
-                                <span>Extracted Clauses ({clausesList.length})</span>
-                              </h3>
-                              {clausesList.length > 0 && (
-                                <span className="text-[11px] font-mono font-bold bg-[#E7E1D3] text-[#1E1B17] px-2 py-0.5 rounded-full shrink-0">
-                                  #{activeIndex + 1} of {clausesList.length}
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="flex items-center space-x-2 shrink-0">
-                              {/* Prev / Next Clause Quick Controls with Disabled States at Ends */}
-                              {clausesList.length > 1 && (
-                                <div className="flex items-center space-x-1 bg-[#F6F1E7] p-1 rounded-full border border-[#E7E1D3] shadow-2xs">
-                                  <button
-                                    onClick={() => {
-                                      if (activeIndex > 0) {
-                                        handleVerifyInDocument(clausesList[activeIndex - 1].id, activeIndex - 1);
-                                      }
-                                    }}
-                                    disabled={activeIndex === 0}
-                                    className={`p-1 rounded-full transition-colors ${activeIndex === 0
-                                        ? 'opacity-30 cursor-not-allowed text-[#6E6659]/50'
-                                        : 'hover:bg-[#E7E1D3] text-[#1E1B17] cursor-pointer'
-                                      }`}
-                                    title={activeIndex === 0 ? 'No previous clause' : 'Previous Clause'}
-                                  >
-                                    <ChevronLeft className="w-4 h-4" />
-                                  </button>
-                                  <span className="text-[11px] font-mono font-extrabold px-1.5 text-[#6E6659]">
-                                    {activeIndex + 1}/{clausesList.length}
-                                  </span>
-                                  <button
-                                    onClick={() => {
-                                      if (activeIndex < clausesList.length - 1) {
-                                        handleVerifyInDocument(clausesList[activeIndex + 1].id, activeIndex + 1);
-                                      }
-                                    }}
-                                    disabled={activeIndex === clausesList.length - 1}
-                                    className={`p-1 rounded-full transition-colors ${activeIndex === clausesList.length - 1
-                                        ? 'opacity-30 cursor-not-allowed text-[#6E6659]/50'
-                                        : 'hover:bg-[#E7E1D3] text-[#1E1B17] cursor-pointer'
-                                      }`}
-                                    title={activeIndex === clausesList.length - 1 ? 'No next clause' : 'Next Clause'}
-                                  >
-                                    <ChevronRight className="w-4 h-4" />
-                                  </button>
-                                </div>
-                              )}
-
-                              {/* Contextual Reading-Level Switcher Capsule */}
-                              <div className="flex items-center bg-[#F6F1E7] p-1 rounded-full border border-[#E7E1D3] shadow-xs">
-                                <button
-                                  onClick={() => setReadingLevel('simple')}
-                                  title="Plain language explanation"
-                                  className={`flex items-center space-x-1 px-3 py-1 rounded-full text-xs font-bold transition-all duration-200 ${readingLevel === 'simple'
-                                      ? 'bg-[#FBF8F1] text-[#1E1B17] shadow-xs border border-[#E7E1D3]'
-                                      : 'text-[#6E6659] hover:text-[#1E1B17]'
-                                    }`}
-                                >
-                                  <Zap className="w-3.5 h-3.5 text-[#B85C38]" />
-                                  <span>Simple</span>
-                                </button>
-                                <button
-                                  onClick={() => setReadingLevel('very_simple')}
-                                  title="Ultra-simple plain everyday language"
-                                  className={`flex items-center space-x-1 px-3 py-1 rounded-full text-xs font-bold transition-all duration-200 ${readingLevel === 'very_simple'
-                                      ? 'bg-[#FBF8F1] text-[#1E1B17] shadow-xs border border-[#E7E1D3]'
-                                      : 'text-[#6E6659] hover:text-[#1E1B17]'
-                                    }`}
-                                >
-                                  <Sparkles className="w-3.5 h-3.5 text-[#B85C38]" />
-                                  <span>Ultra Simple</span>
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Quick Deck Jump Bar for instant clause access with auto-scrolling refs */}
-                          {clausesList.length > 1 && (
-                            <div
-                              ref={deckJumpContainerRef}
-                              className="flex items-center space-x-1.5 overflow-x-auto py-2 px-1.5 no-scrollbar text-xs scroll-smooth my-0.5"
-                            >
-                              <span className="text-[10px] font-bold text-[#6E6659] uppercase tracking-wider shrink-0 pr-1">
-                                Deck Jump:
-                              </span>
-                              {clausesList.map((c, i) => (
-                                <button
-                                  key={`deck-jump-${c.id}`}
-                                  ref={(el) => {
-                                    deckJumpPillRefs.current[i] = el;
-                                  }}
-                                  onClick={() => handleVerifyInDocument(c.id, i)}
-                                  className={`px-2.5 py-1 rounded-full border text-[11px] font-semibold shrink-0 transition-all cursor-pointer shadow-2xs active:scale-95 my-0.5 ${i === activeIndex
-                                      ? 'bg-[#B85C38] text-white border-[#B85C38] font-bold ring-2 ring-[#B85C38]/30 scale-105'
-                                      : 'bg-[#F6F1E7] hover:bg-[#B85C38] hover:text-white border-[#E7E1D3] text-[#1E1B17]'
-                                    }`}
-                                >
-                                  #{i + 1} {c.clause_type}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Single Active Card View Runway (Non-clipping padding) */}
-                        {activeClause && (
-                          <div
-                            id="active-clause-card-container"
-                            key={activeClause.id}
-                            className="animate-fade-in-up transition-all duration-300 pb-6 mb-4"
-                          >
-                            <ClauseCard
-                              clause={activeClause}
-                              index={activeIndex}
-                              totalCards={clausesList.length}
-                              readingLevel={readingLevel}
-                              onVerifyInDocument={handleVerifyInDocument}
-                              onOpenShareModal={setSelectedShareClause}
-                              isActive={true}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-                </div>
-
                 {/* Actionable Outputs: Checklist, Possibilities, Lawyer Briefing */}
                 <div className="pt-2">
                   <ActionableOutputs document={documentAnalysis} />
@@ -566,12 +624,16 @@ function AppContent() {
                   <img
                     src="/assets/family-illustration.png"
                     alt="Illustration of a multi-generational family using LegalLens together"
+                    width={800}
+                    height={400}
                     loading="lazy"
                     draggable="false"
                     onDragStart={(e) => e.preventDefault()}
                     onContextMenu={(e) => e.preventDefault()}
                     onMouseDown={(e) => e.preventDefault()}
                     onDoubleClick={(e) => e.preventDefault()}
+                    onTouchStart={(e) => e.preventDefault()}
+                    onTouchMove={(e) => e.preventDefault()}
                     className="w-full h-auto max-h-[360px] sm:max-h-[420px] md:max-h-[480px] max-w-4xl object-contain mx-auto transition-transform duration-500 ease-out hover:scale-[1.02] select-none pointer-events-none"
                   />
                 </div>

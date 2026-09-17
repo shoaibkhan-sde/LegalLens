@@ -196,7 +196,7 @@ export const VoiceGroundedChat: React.FC<VoiceGroundedChatProps> = ({
                         className="text-[10px] bg-[#FBF8F1] hover:bg-[#E7E1D3]/60 text-[#B85C38] px-2 py-0.5 rounded border border-[#E7E1D3] font-semibold flex items-center space-x-1"
                       >
                         <Search className="w-2.5 h-2.5 text-[#065F46]" />
-                        <span>Clause #{cid.replace(/[^\d]/g, '') || cid}</span>
+                        <span>Clause {cid.replace(/[^\d]/g, '') || cid}</span>
                       </button>
                     ))}
                   </div>
@@ -236,11 +236,14 @@ export const VoiceGroundedChat: React.FC<VoiceGroundedChatProps> = ({
         </button>
 
         <input
+          id="voice-grounded-chat-input"
+          name="chatQuery"
           type="text"
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
           placeholder={isListening ? 'Listening to your voice...' : 'Type or speak a question about this contract...'}
+          aria-label={isListening ? 'Listening to your voice' : 'Type or speak a question about this contract'}
           className="flex-1 bg-[#F6F1E7] border border-[#E7E1D3] rounded-lg px-3.5 py-2 text-xs text-[#1E1B17] focus:outline-none focus:border-[#B85C38]"
         />
 

@@ -17,6 +17,7 @@ interface SpeechRecognitionErrorEvent {
 export class SpeechEngine {
   private static synth: SpeechSynthesis | null = typeof window !== 'undefined' ? window.speechSynthesis : null;
   private static activeUtterance: SpeechSynthesisUtterance | null = null;
+  private static pendingTimeout: any = null;
 
   // Text-to-Speech (Read Aloud)
   public static speak(
@@ -32,59 +33,124 @@ export class SpeechEngine {
       return;
     }
 
-    // Cancel active speech
-    this.stop();
+    // Clear any queued pending speak timeouts
+    if (this.pendingTimeout) {
+      clearTimeout(this.pendingTimeout);
+      this.pendingTimeout = null;
+    }
 
+    const isCurrentlySpeaking = this.synth.speaking || this.synth.pending;
+
+    // Only cancel if speech is actively playing or queued
+    if (isCurrentlySpeaking) {
+      try {
+        this.synth.cancel();
+      } catch {}
+    }
+
+    // Create Utterance synchronously within the user tap event
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 0.95; // Slightly slower, clear tone for low literacy / accessibility
+    utterance.rate = 0.95; // Slightly slower, clear tone for accessible reading
     utterance.pitch = 1.0;
 
     const isHindi = lang === 'hi' || lang === 'hi-IN';
     utterance.lang = isHindi ? 'hi-IN' : 'en-US';
 
     // Pick Hindi or English voice based on active language mode
-    const voices = this.synth.getVoices();
-    let preferredVoice: SpeechSynthesisVoice | undefined;
+    try {
+      const voices = this.synth.getVoices() || [];
+      let preferredVoice: SpeechSynthesisVoice | undefined;
 
-    if (isHindi) {
-      preferredVoice =
-        voices.find((v) => v.lang.includes('hi-IN') || v.lang.includes('hi_IN') || v.lang.startsWith('hi')) ||
-        voices.find((v) => v.name.toLowerCase().includes('hindi')) ||
-        voices.find((v) => v.lang.includes('IN'));
+      if (voices.length > 0) {
+        if (isHindi) {
+          preferredVoice =
+            voices.find((v) => v.lang.includes('hi-IN') || v.lang.includes('hi_IN') || v.lang.startsWith('hi')) ||
+            voices.find((v) => v.name.toLowerCase().includes('hindi')) ||
+            voices.find((v) => v.lang.includes('IN'));
 
-      if (!preferredVoice || (!preferredVoice.lang.includes('hi') && !preferredVoice.name.toLowerCase().includes('hindi'))) {
-        console.warn('⚠️ Hindi TTS voice not found on device/browser. Falling back to default system voice with hi-IN language tag.');
-        preferredVoice = voices.find((v) => v.default) || voices[0];
+          if (!preferredVoice || (!preferredVoice.lang.includes('hi') && !preferredVoice.name.toLowerCase().includes('hindi'))) {
+            preferredVoice = voices.find((v) => v.default) || voices[0];
+          }
+        } else {
+          preferredVoice =
+            voices.find((v) => v.lang.includes('en-IN') || v.lang.includes('en_IN')) ||
+            voices.find((v) => v.lang.startsWith('en')) ||
+            voices.find((v) => v.default) ||
+            voices[0];
+        }
+
+        if (preferredVoice) {
+          utterance.voice = preferredVoice;
+        }
       }
-    } else {
-      preferredVoice =
-        voices.find((v) => v.lang.includes('en-IN') || v.lang.includes('en_IN')) ||
-        voices.find((v) => v.lang.startsWith('en')) ||
-        voices.find((v) => v.default) ||
-        voices[0];
-    }
+    } catch {}
 
-    if (preferredVoice) {
-      utterance.voice = preferredVoice;
-    }
+    utterance.onstart = () => {
+      onStart?.();
+    };
 
-    utterance.onstart = () => onStart?.();
     utterance.onend = () => {
       this.activeUtterance = null;
       onEnd?.();
     };
-    utterance.onerror = (event) => {
+
+    utterance.onerror = (event: any) => {
       this.activeUtterance = null;
-      onError?.(event);
+      // Filter out harmless mobile cancel/interrupted events when speech is stopped or replaced
+      if (event?.error !== 'interrupted' && event?.error !== 'canceled') {
+        onError?.(event);
+      } else {
+        onEnd?.();
+      }
     };
 
     this.activeUtterance = utterance;
-    this.synth.speak(utterance);
+
+    const executeSpeak = () => {
+      if (!this.synth) return;
+
+      // Resume if browser synthesis is in a paused state (iOS Safari fix)
+      try {
+        if (this.synth.paused) {
+          this.synth.resume();
+        }
+      } catch {}
+
+      try {
+        this.synth.speak(utterance);
+      } catch (err) {
+        console.warn('Speech synthesis speak error:', err);
+        onError?.(err);
+        return;
+      }
+
+      // iOS Safari fallback check: resume if engine enters paused state immediately after speak()
+      setTimeout(() => {
+        try {
+          if (this.synth && this.synth.paused) {
+            this.synth.resume();
+          }
+        } catch {}
+      }, 50);
+    };
+
+    // If an existing utterance was canceled above, wait a tiny tick (30ms) for mobile WebKit/Blink audio queue to flush cancel signal
+    if (isCurrentlySpeaking) {
+      this.pendingTimeout = setTimeout(executeSpeak, 30);
+    } else {
+      executeSpeak();
+    }
   }
 
   public static stop(): void {
+    if (this.pendingTimeout) {
+      clearTimeout(this.pendingTimeout);
+      this.pendingTimeout = null;
+    }
     if (this.synth) {
-      this.synth.cancel();
+      try {
+        this.synth.cancel();
+      } catch {}
       this.activeUtterance = null;
     }
   }
