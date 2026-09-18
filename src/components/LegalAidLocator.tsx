@@ -72,8 +72,6 @@ export const LegalAidLocator: React.FC = () => {
   const isHi = language === 'hi';
   const [selectedState, setSelectedState] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [isIllustrationLoaded, setIsIllustrationLoaded] = useState(false);
-  const [isEmptyStateLoaded, setIsEmptyStateLoaded] = useState(false);
 
   const filteredCenters = SAMPLE_DLSA_CENTERS.filter((center) => {
     const matchesState = selectedState === 'All' || center.state === selectedState;
@@ -155,16 +153,10 @@ export const LegalAidLocator: React.FC = () => {
             onDragStart={(e) => e.preventDefault()}
             onContextMenu={(e) => e.preventDefault()}
           >
-            {!isIllustrationLoaded && (
-              <div className="absolute inset-0 bg-[#F6F1E7] border border-[#E7E1D3] rounded-2xl animate-pulse flex items-center justify-center">
-                <MapPin className="w-6 h-6 text-[#B85C38]/40 animate-pulse" />
-              </div>
-            )}
             <img
               src="/assets/legal-aid-illustration.png"
               alt="Illustration of a person being guided toward legal help"
               loading="eager"
-              onLoad={() => setIsIllustrationLoaded(true)}
               draggable="false"
               onDragStart={(e) => e.preventDefault()}
               onContextMenu={(e) => e.preventDefault()}
@@ -172,8 +164,7 @@ export const LegalAidLocator: React.FC = () => {
               onDoubleClick={(e) => e.preventDefault()}
               onTouchStart={(e) => e.preventDefault()}
               onTouchMove={(e) => e.preventDefault()}
-              className={`w-full h-auto max-w-xs sm:max-w-sm object-contain mx-auto select-none pointer-events-none transition-opacity duration-300 ${isIllustrationLoaded ? 'opacity-100' : 'opacity-0'
-                }`}
+              className="w-full h-auto max-w-xs sm:max-w-sm object-contain mx-auto select-none pointer-events-none"
             />
           </div>
         </div>
@@ -215,14 +206,10 @@ export const LegalAidLocator: React.FC = () => {
       {filteredCenters.length === 0 ? (
         <div className="bg-[#FBF8F1] border border-[#E7E1D3] rounded-2xl p-8 text-center space-y-3 shadow-xs">
           <div className="relative w-24 h-24 mx-auto">
-            {!isEmptyStateLoaded && (
-              <div className="absolute inset-0 bg-[#F6F1E7] border border-[#E7E1D3] rounded-xl animate-pulse" />
-            )}
             <img
               src="/assets/empty-state-illustration.png"
               alt="Illustration of a magnifying glass examining a document"
               loading="eager"
-              onLoad={() => setIsEmptyStateLoaded(true)}
               draggable="false"
               onDragStart={(e) => e.preventDefault()}
               onContextMenu={(e) => e.preventDefault()}
@@ -230,8 +217,7 @@ export const LegalAidLocator: React.FC = () => {
               onDoubleClick={(e) => e.preventDefault()}
               onTouchStart={(e) => e.preventDefault()}
               onTouchMove={(e) => e.preventDefault()}
-              className={`w-24 h-24 object-contain mx-auto select-none pointer-events-none transition-opacity duration-300 ${isEmptyStateLoaded ? 'opacity-100' : 'opacity-0'
-                }`}
+              className="w-24 h-24 object-contain mx-auto select-none pointer-events-none"
             />
           </div>
           <div>

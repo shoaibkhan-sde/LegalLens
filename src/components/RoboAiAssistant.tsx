@@ -25,6 +25,7 @@ import { QuotaBar } from './QuotaBar';
 import { FormattedMessageText } from './FormattedMessageText';
 import { useLanguage } from '../context/LanguageContext';
 import { localizeChatMessageText, localizeChatMessage } from '../utils/chatLocalization';
+import { AnimatedMicButton, MicState } from './AnimatedMicButton';
 
 export interface ChatSession {
   id: string;
@@ -34,6 +35,7 @@ export interface ChatSession {
 }
 
 interface RoboAiAssistantProps {
+  sectionId?: 'analyze' | 'compare' | 'legal_aid' | string;
   document?: DocumentAnalysisResult | null;
   inputContext?: ActiveInputContext | null;
   onVerifyClause?: (clauseId: string) => void;
@@ -41,11 +43,8 @@ interface RoboAiAssistantProps {
   onToggleOpen?: (open: boolean) => void;
 }
 
-const STORAGE_ACTIVE_KEY = 'legallens_active_messages';
-const STORAGE_HISTORY_KEY = 'legallens_chat_history';
-const STORAGE_SESSION_ID_KEY = 'legallens_current_session_id';
-
 export const RoboAiAssistant: React.FC<RoboAiAssistantProps> = ({
+  sectionId: propSectionId,
   document,
   inputContext,
   onVerifyClause,
@@ -53,9 +52,16 @@ export const RoboAiAssistant: React.FC<RoboAiAssistantProps> = ({
   onToggleOpen,
 }) => {
   const { language, t } = useLanguage();
+
+  const sectionId = propSectionId || (inputContext?.isComparisonMode ? 'compare' : 'analyze');
+  const STORAGE_ACTIVE_KEY = `legallens_active_messages_${sectionId}`;
+  const STORAGE_HISTORY_KEY = `legallens_chat_history_${sectionId}`;
+  const STORAGE_SESSION_ID_KEY = `legallens_current_session_id_${sectionId}`;
+  const STORAGE_OPEN_KEY = `legallens_is_chat_open_${sectionId}`;
+
   const [internalIsOpen, setInternalIsOpen] = useState<boolean>(() => {
     try {
-      const saved = localStorage.getItem('legallens_is_chat_open');
+      const saved = localStorage.getItem(STORAGE_OPEN_KEY);
       if (saved !== null) return JSON.parse(saved);
     } catch {}
     return false;
@@ -64,7 +70,7 @@ export const RoboAiAssistant: React.FC<RoboAiAssistantProps> = ({
 
   const toggleOpen = (openState: boolean) => {
     try {
-      localStorage.setItem('legallens_is_chat_open', JSON.stringify(openState));
+      localStorage.setItem(STORAGE_OPEN_KEY, JSON.stringify(openState));
     } catch {}
     if (onToggleOpen) {
       onToggleOpen(openState);
@@ -75,7 +81,7 @@ export const RoboAiAssistant: React.FC<RoboAiAssistantProps> = ({
     if (openState) {
       setTimeout(() => {
         if (typeof window !== 'undefined') {
-          const chatElem = window.document.getElementById('legal-chat-container') || window.document.getElementById('robo-assistant-container');
+          const chatElem = window.document.getElementById('legal-chat-container') || window.document.getElementById('compare-chat-container') || window.document.getElementById('robo-assistant-container');
           if (chatElem) {
             chatElem.scrollIntoView({ behavior: 'smooth', block: 'start' });
           }
@@ -90,7 +96,7 @@ export const RoboAiAssistant: React.FC<RoboAiAssistantProps> = ({
       const savedId = localStorage.getItem(STORAGE_SESSION_ID_KEY);
       if (savedId) return savedId;
     } catch {}
-    return `chat_${Date.now()}`;
+    return `chat_${sectionId}_${Date.now()}`;
   });
 
   // Restore active messages from localStorage on load if available
@@ -114,9 +120,33 @@ export const RoboAiAssistant: React.FC<RoboAiAssistantProps> = ({
     }
   });
 
+  // Re-sync messages, history, and session ID whenever sectionId changes
+  useEffect(() => {
+    try {
+      const savedId = localStorage.getItem(STORAGE_SESSION_ID_KEY);
+      setCurrentSessionId(savedId || `chat_${sectionId}_${Date.now()}`);
+
+      const savedMessages = localStorage.getItem(STORAGE_ACTIVE_KEY);
+      if (savedMessages) {
+        const parsed = JSON.parse(savedMessages);
+        if (Array.isArray(parsed)) {
+          setMessages(parsed);
+        } else {
+          setMessages([]);
+        }
+      } else {
+        setMessages([]);
+      }
+
+      const savedHistory = localStorage.getItem(STORAGE_HISTORY_KEY);
+      setChatHistory(savedHistory ? JSON.parse(savedHistory) : []);
+    } catch {}
+  }, [sectionId]);
+
   const [showHistoryModal, setShowHistoryModal] = useState<boolean>(false);
   const [inputText, setInputText] = useState('');
   const [isListening, setIsListening] = useState(false);
+  const [micState, setMicState] = useState<MicState>('muted');
   const [activeSpeechId, setActiveSpeechId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [quotaTelemetry, setQuotaTelemetry] = useState<QuotaTelemetry | undefined>(undefined);
@@ -175,7 +205,17 @@ export const RoboAiAssistant: React.FC<RoboAiAssistantProps> = ({
         let welcomeText = isHi
           ? `नमस्ते! मैं आपका कानूनी AI सहायक हूँ। कोई भी कानूनी प्रश्न पूछें, या विश्लेषण करने के लिए अनुबंध अपलोड करें!`
           : `Hi! I am your Legal Assistant. Ask any legal question (e.g. deposit rules, notice periods in Bengaluru), or upload a contract to analyze!`;
-        if (document) {
+        if (inputContext?.isComparisonMode) {
+          if (!inputContext.hasInput && !inputContext.docAText && !inputContext.docBText) {
+            welcomeText = isHi
+              ? `नमस्ते! मैं आपका लीगललेंस AI सहायक हूँ। तुलना के लिए कृपया ऊपर **Document A** या **Document B** का पाठ दर्ज करें, फिर मुझसे अपने अनुबंधों के बारे में कोई भी प्रश्न पूछें!`
+              : `Hello! I am your LegalLens AI Assistant. Please paste or upload text for **Document A** or **Document B** above, then ask me anything about your contracts!`;
+          } else {
+            welcomeText = isHi
+              ? `नमस्ते! मैं आपका लीगललेंस AI सहायक हूँ। मुझसे **Document A**, **Document B**, या दोनों अनुबंधों की तुलना के बारे में कोई भी प्रश्न पूछें!`
+              : `Hello! I am your LegalLens AI Assistant. Ask me anything about **Document A**, **Document B**, or a side-by-side comparison between both contracts!`;
+          }
+        } else if (document) {
           welcomeText = isHi
             ? `नमस्ते! मैं आपका लीगललेंस AI सहायक हूँ। अपने अनुबंध (${document.document_title}) के बारे में कुछ भी पूछें। मैं खंड, जमा वापसी या नोटिस अवधि समझा सकता हूँ!`
             : `Hello! I am your LegalLens AI Assistant. Ask me anything about your contract (${document.document_title}). I can explain clauses, deposit refunds, or notice periods!`;
@@ -345,25 +385,62 @@ export const RoboAiAssistant: React.FC<RoboAiAssistantProps> = ({
     }
   };
 
+  const [activeListener, setActiveListener] = useState<{ stop: () => void } | null>(null);
+
   const handleToggleVoiceInput = () => {
-    if (isListening) {
-      setIsListening(false);
+    if (isListening || micState === 'listening') {
+      if (activeListener) {
+        activeListener.stop();
+        setActiveListener(null);
+      } else {
+        setIsListening(false);
+        setMicState('muted');
+      }
     } else {
+      setMicState('listening');
       setIsListening(true);
-      SpeechEngine.listen(
-        (transcript) => {
-          setInputText(transcript);
-          setIsListening(false);
-          handleSend(transcript);
+      const listener = SpeechEngine.listen(
+        (draftText) => {
+          // Live preview draft in input field ONLY (never submitted prematurely)
+          setInputText(draftText);
         },
-        () => setIsListening(true),
-        () => setIsListening(false),
-        (err) => {
-          console.warn('Speech recognition error:', err);
+        (finalText) => {
+          // Final accumulated transcript submitted ONCE!
+          setInputText(finalText);
           setIsListening(false);
+          setMicState('muted');
+          setActiveListener(null);
+          handleSend(finalText);
+        },
+        () => {
+          setIsListening(true);
+          setMicState('listening');
+        },
+        () => {
+          setIsListening(false);
+          setMicState('muted');
+          setActiveListener(null);
+        },
+        (err) => {
+          setIsListening(false);
+          setActiveListener(null);
+          console.warn('Speech recognition error:', err);
+          if (
+            err === 'not-allowed' ||
+            err === 'service-not-allowed' ||
+            (typeof err === 'string' && err.includes('blocked'))
+          ) {
+            setMicState('permission-denied');
+          } else if (err === 'no-speech') {
+            setMicState('no-speech');
+            setTimeout(() => setMicState('muted'), 4000);
+          } else {
+            setMicState('muted');
+          }
         },
         language
       );
+      setActiveListener(listener);
     }
   };
 
@@ -629,17 +706,12 @@ export const RoboAiAssistant: React.FC<RoboAiAssistantProps> = ({
 
       {/* Input Bar */}
       <div className="p-3 bg-[#F6F1E7] border-t border-[#E7E1D3] flex items-center space-x-2 shrink-0">
-        <button
-          onClick={handleToggleVoiceInput}
-          title="Speak your question"
-          className={`p-2 rounded-lg border transition-colors ${
-            isListening
-              ? 'bg-[#FEE2E2] text-[#991B1B] border-[#FCA5A5] animate-pulse'
-              : 'bg-[#FBF8F1] hover:bg-[#E7E1D3]/50 text-[#B85C38] border-[#E7E1D3]'
-          }`}
-        >
-          {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-        </button>
+        <AnimatedMicButton
+          isListening={isListening}
+          micState={micState}
+          onToggle={handleToggleVoiceInput}
+          language={language}
+        />
 
         <input
           id="robo-assistant-input"

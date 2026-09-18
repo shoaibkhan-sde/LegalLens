@@ -1,0 +1,52 @@
+[
+  {
+    "id": "clause_1",
+    "title": "RESIDENTIAL LEASE AGREEMENT",
+    "text": "RESIDENTIAL LEASE AGREEMENT This Agreement is made on the 1st day of April, 2026, between Mr. Rakesh Kumar Sharma (hereinafter \"Lessor\") and Ms. Ananya Iyer (hereinafter \"Lessee\"), for the residential premises situated at Flat No. 402, Sunrise Apartments, Koramangala 4th Block, Bengaluru - 560034."
+  },
+  {
+    "id": "clause_2",
+    "title": "TERM",
+    "text": "1. TERM: This lease shall be for a period of 11 (eleven) months commencing from 1st April 2026, with a mandatory lock-in period of 6 (six) months. The Lessee shall not terminate this Agreement prior to expiry of the lock-in period without paying the Lessor an amount equivalent to the rent for the remainder of the lock-in term."
+  },
+  {
+    "id": "clause_3",
+    "title": "RENT",
+    "text": "2. RENT: The monthly rent shall be Rs. 32,000/- (Rupees Thirty-Two Thousand only), payable in advance on or before the 5th of every calendar month, subject to an annual escalation of 5% (five percent) at the time of renewal."
+  },
+  {
+    "id": "clause_4",
+    "title": "SECURITY DEPOSIT",
+    "text": "3. SECURITY DEPOSIT: The Lessee has paid an interest-free security deposit of Rs. 1,60,000/- (five months' rent) to the Lessor. The deposit shall be refunded to the Lessee upon vacating the premises, after deducting any dues, damages, or unpaid utility bills."
+  },
+  {
+    "id": "clause_5",
+    "title": "NOTICE PERIOD",
+    "text": "4. NOTICE PERIOD: Either party shall provide 60 (sixty) days' written notice prior to termination of this Agreement, except in cases covered under Clause 1 (lock-in period)."
+  },
+  {
+    "id": "clause_6",
+    "title": "MAINTENANCE AND REPAIRS",
+    "text": "5. MAINTENANCE AND REPAIRS: The Lessee shall bear the cost of minor repairs up to Rs. 2,000/- per instance. Major structural repairs shall be the responsibility of the Lessor."
+  },
+  {
+    "id": "clause_7",
+    "title": "INDEMNITY",
+    "text": "6. INDEMNITY: The Lessee shall indemnify and keep indemnified the Lessor against any loss, damage, or claim arising out of the Lessee's use of the premises during the tenancy period."
+  },
+  {
+    "id": "clause_8",
+    "title": "DISPUTE RESOLUTION",
+    "text": "7. DISPUTE RESOLUTION: Any dispute arising out of or in connection with this Agreement shall first be referred to arbitration under the Arbitration and Conciliation Act, 1996, with a sole arbitrator appointed by mutual consent of both parties, prior to any recourse to civil courts."
+  },
+  {
+    "id": "clause_9",
+    "title": "GOVERNING LAW AND JURISDICTION",
+    "text": "8. GOVERNING LAW AND JURISDICTION: This Agreement shall be governed by the laws of India, and the courts at Bengaluru shall have exclusive jurisdiction over any disputes arising herefrom."
+  },
+  {
+    "id": "clause_10",
+    "title": "REGISTRATION",
+    "text": "9. REGISTRATION: The parties acknowledge that this Agreement, being for a term exceeding 11 months in some renewals, may require registration under the Registration Act, 1908, and appropriate stamp duty under the Karnataka Stamp Act."
+  }
+]

@@ -93,7 +93,7 @@ async function runGroundingRegressionTests() {
         if (c.risk_level === 'high' && !cons.startsWith('high risk')) {
           throw new Error(`Clause #${c.clause_number} (${c.title}) has High Risk badge but consequence is "${c.one_line_consequence}"`);
         }
-        if (c.risk_level === 'medium' && !cons.startsWith('watch out')) {
+        if (((c.risk_level as string) === 'medium' || c.risk_level === 'watch_out') && !cons.startsWith('watch out')) {
           throw new Error(`Clause #${c.clause_number} (${c.title}) has Watch Out badge but consequence is "${c.one_line_consequence}"`);
         }
         if (c.risk_level === 'low' && (cons.startsWith('high risk') || cons.startsWith('watch out'))) {
@@ -106,7 +106,7 @@ async function runGroundingRegressionTests() {
       for (const [titleSubstring, badTypes] of Object.entries(testCase.disallowedTypes)) {
         const matchedClause = result.clauses.find((c) => c.title.toLowerCase().includes(titleSubstring.toLowerCase()));
         if (matchedClause) {
-          if (badTypes.includes(matchedClause.clause_type)) {
+          if (badTypes.includes(matchedClause.clause_type as any)) {
             throw new Error(`Clause "${matchedClause.title}" was mistagged as "${matchedClause.clause_type}"`);
           }
         }
@@ -116,7 +116,7 @@ async function runGroundingRegressionTests() {
       // Assertion 6: Security deposit Watch Out rule (if applicable)
       const depositClause = result.clauses.find((c) => c.clause_type === 'security deposit');
       if (depositClause && testCase.file === '01_rental_agreement.txt') {
-        if (depositClause.risk_level !== 'medium') {
+        if (depositClause.risk_level !== 'watch_out' && (depositClause.risk_level as string) !== 'medium') {
           throw new Error(`Security deposit clause lacking fixed refund days in 01_rental_agreement.txt was tagged ${depositClause.risk_level} instead of Watch Out (medium)`);
         }
         console.log(`   ✅ Security deposit clause correctly tagged Watch Out (medium) due to refund deadline ambiguity`);

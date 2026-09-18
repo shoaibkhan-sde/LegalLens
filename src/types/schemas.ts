@@ -40,45 +40,64 @@ export const DOCUMENT_CATEGORY_ENUM: DocumentCategory[] = [
 export type ClauseType =
   | 'parties & recitals'
   | 'term & termination'
-  | 'payment/consideration'
+  | 'rent & payment'
   | 'security deposit'
-  | 'rent escalation'
-  | 'confidentiality'
-  | 'indemnity'
-  | 'limitation of liability'
-  | 'force majeure'
-  | 'non-compete/non-solicitation'
-  | 'assignment'
-  | 'renewal'
   | 'notice period'
-  | 'dispute resolution/arbitration'
+  | 'maintenance & repairs'
+  | 'use & restrictions'
+  | 'indemnity & liability'
+  | 'dispute resolution'
   | 'governing law & jurisdiction'
   | 'stamp duty & registration'
   | 'penalty/liquidated damages'
+  | 'confidentiality'
+  | 'limitation of liability'
+  | 'force majeure'
+  | 'assignment'
+  | 'renewal'
   | 'other';
 
 export const CLAUSE_TYPE_ENUM: ClauseType[] = [
   'parties & recitals',
   'term & termination',
-  'payment/consideration',
+  'rent & payment',
   'security deposit',
-  'rent escalation',
-  'confidentiality',
-  'indemnity',
-  'limitation of liability',
-  'force majeure',
-  'non-compete/non-solicitation',
-  'assignment',
-  'renewal',
   'notice period',
-  'dispute resolution/arbitration',
+  'maintenance & repairs',
+  'use & restrictions',
+  'indemnity & liability',
+  'dispute resolution',
   'governing law & jurisdiction',
   'stamp duty & registration',
   'penalty/liquidated damages',
+  'confidentiality',
+  'limitation of liability',
+  'force majeure',
+  'assignment',
+  'renewal',
   'other',
 ];
 
-export type RiskLevel = 'low' | 'medium' | 'high';
+export function normalizeClauseType(rawType: string): ClauseType {
+  if (!rawType) return 'other';
+  const lower = rawType.toLowerCase().trim();
+  if (lower === 'payment/consideration' || lower === 'rent escalation') return 'rent & payment';
+  if (lower === 'indemnity') return 'indemnity & liability';
+  if (lower === 'dispute resolution/arbitration') return 'dispute resolution';
+  if (lower === 'non-compete/non-solicitation') return 'use & restrictions';
+  if (CLAUSE_TYPE_ENUM.includes(lower as ClauseType)) return lower as ClauseType;
+  return 'other';
+}
+
+export type RiskLevel = 'low' | 'watch_out' | 'high';
+
+export function normalizeRiskLevel(rawRisk: string): RiskLevel {
+  if (!rawRisk) return 'low';
+  const lower = rawRisk.toLowerCase().trim();
+  if (lower === 'high') return 'high';
+  if (lower === 'watch_out' || lower === 'watch out' || lower === 'medium') return 'watch_out';
+  return 'low';
+}
 
 export interface Guard1InputGate {
   is_legal_document: boolean;
@@ -89,15 +108,17 @@ export interface Guard1InputGate {
 
 export interface SimplifiedClause {
   id: string;
-  clause_number?: string;
+  clause_number?: string | null;
   clause_type: ClauseType;
   title: string;
   original_text: string;
-  simple_explanation: string; // Plain language
-  very_simple_explanation: string; // Ultra-simple plain language
+  simple_explanation: string | null; // Plain language or null if error
+  very_simple_explanation: string | null; // Ultra-simple plain language or null if error
   risk_level: RiskLevel;
   icon_name: string; // Lucide icon name for visual understanding
   one_line_consequence: string; // Color + Icon + Plain language consequence
+  needs_review?: boolean;
+  meaning_error?: boolean;
   obligations?: string[];
   deadlines?: string[];
 }
@@ -106,9 +127,20 @@ export interface InternalContradiction {
   id: string;
   clause_a_id: string;
   clause_b_id: string;
+  clause_a_title: string;
+  clause_b_title: string;
+  clause_a_obligation: string;
+  clause_b_obligation: string;
   description: string;
   explanation: string;
   risk_level: RiskLevel;
+}
+
+export interface ExecutionBlockAnalysis {
+  present: boolean;
+  missing_signatures: boolean;
+  witness_attestation_missing: boolean;
+  defect_description?: string;
 }
 
 export interface DocumentAnalysisResult {
@@ -120,6 +152,8 @@ export interface DocumentAnalysisResult {
   summary_very_simple: string;
   clauses: SimplifiedClause[];
   contradictions: InternalContradiction[];
+  conflicts?: InternalContradiction[];
+  execution_block?: ExecutionBlockAnalysis;
   checklist: ChecklistArtifact;
   options_next_steps: NextStepsOption[];
   lawyer_briefing: LawyerBriefingArtifact;
@@ -225,4 +259,12 @@ export interface ActiveInputContext {
   extractedInputText?: string;
   capturedPhoto?: boolean;
   hasInput?: boolean;
+
+  // Compare Contracts Section Context
+  isComparisonMode?: boolean;
+  docATitle?: string;
+  docAText?: string;
+  docBTitle?: string;
+  docBText?: string;
+  comparisonResult?: ComparisonResult | null;
 }

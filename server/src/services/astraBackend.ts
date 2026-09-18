@@ -52,9 +52,14 @@ import {
   DOCUMENT_CATEGORY_ENUM,
   CLAUSE_TYPE_ENUM,
   ClauseType,
+  RiskLevel,
+  normalizeClauseType,
+  normalizeRiskLevel,
   DocumentCategory,
   SimplifiedClause,
   QuotaTelemetry,
+  InternalContradiction,
+  ExecutionBlockAnalysis,
 } from '../../../src/types/schemas';
 import { SAMPLE_RENTAL_AGREEMENT, SAMPLE_EMPLOYMENT_CONTRACT } from '../data/sampleDocuments';
 import { alignClauses } from '../../../src/utils/clauseAlignment';
@@ -453,10 +458,10 @@ async function performVisionOcrOnImageBuffer(fileBuffer: Buffer, mimeType: strin
     Buffer.isBuffer(fileBuffer) &&
     fileBuffer.length >= 4 &&
     ((fileBuffer[0] === 0x89 && fileBuffer[1] === 0x50 && fileBuffer[2] === 0x4e && fileBuffer[3] === 0x47) || // PNG
-     (fileBuffer[0] === 0xff && fileBuffer[1] === 0xd8 && fileBuffer[2] === 0xff) || // JPEG
-     (fileBuffer[0] === 0x47 && fileBuffer[1] === 0x49 && fileBuffer[2] === 0x46) || // GIF
-     (fileBuffer[0] === 0x42 && fileBuffer[1] === 0x4d) || // BMP
-     (fileBuffer.length >= 12 && fileBuffer[8] === 0x57 && fileBuffer[9] === 0x45 && fileBuffer[10] === 0x42 && fileBuffer[11] === 0x50)); // WEBP
+      (fileBuffer[0] === 0xff && fileBuffer[1] === 0xd8 && fileBuffer[2] === 0xff) || // JPEG
+      (fileBuffer[0] === 0x47 && fileBuffer[1] === 0x49 && fileBuffer[2] === 0x46) || // GIF
+      (fileBuffer[0] === 0x42 && fileBuffer[1] === 0x4d) || // BMP
+      (fileBuffer.length >= 12 && fileBuffer[8] === 0x57 && fileBuffer[9] === 0x45 && fileBuffer[10] === 0x42 && fileBuffer[11] === 0x50)); // WEBP
 
   if (hasValidMagicBytes) {
     try {
@@ -473,7 +478,7 @@ async function performVisionOcrOnImageBuffer(fileBuffer: Buffer, mimeType: strin
           return tesseractText.trim();
         }
       } catch (ocrErr) {
-        await worker.terminate().catch(() => {});
+        await worker.terminate().catch(() => { });
         console.warn('Local Tesseract OCR recognition warning:', (ocrErr as any)?.message || ocrErr);
       }
     } catch (err) {
@@ -568,7 +573,7 @@ function extractDocxText(fileBuffer: Buffer): string {
             } catch (zErr) {
               try {
                 xmlContent = zlib.inflateSync(rawSlice).toString('utf-8');
-              } catch (_) {}
+              } catch (_) { }
             }
           } else if (compMethod === 0) {
             xmlContent = rawSlice.toString('utf-8');
@@ -1309,7 +1314,7 @@ export function runGuard1InputGate(text: string): Guard1InputGate {
   const firstLines = trimmed.split(/\r?\n/).slice(0, 3).join(' ').toLowerCase();
   const isExplicitLegalHeader =
     (/^#?\s*(legal|rental|lease|tenancy|employment|service|sale|loan|mortgage|purchase|partnership|consulting|vendor)\b/i.test(firstLines) &&
-    /\b(workspace|agreement|contract|document|policy|notice|deed|terms|statement|mou|brief|form|directive|rules|guidelines|letter)\b/i.test(firstLines)) ||
+      /\b(workspace|agreement|contract|document|policy|notice|deed|terms|statement|mou|brief|form|directive|rules|guidelines|letter)\b/i.test(firstLines)) ||
     /^(मुख्य|व्यावसायिक|किराया|पट्टा|रोजगार|सेवा|अनुबंध|करार|शपथ|ऋण|विक्रय)/i.test(firstLines);
 
   const hasStrongTechIndicator =
@@ -1799,14 +1804,16 @@ export function chunkDocumentTextIntoClauses(text: string): SimplifiedClause[] {
     const clauseType = classifyClauseType(origText, b.title);
     const title = b.title && b.title.trim().length > 0 ? cleanClauseTitle(b.title, idx + 1) : `Clause ${idx + 1}: ${getClauseTypeLabel(clauseType)}`;
 
+    const groundedExp = generateGroundedHeuristicExplanation(origText, clauseType, title);
+
     return {
       id: `clause_${idx + 1}`,
       clause_number: `${idx + 1}`,
       clause_type: clauseType,
       title,
       original_text: origText,
-      simple_explanation: generateSimpleExplanation(origText, clauseType),
-      very_simple_explanation: generateVerySimpleExplanation(origText, clauseType),
+      simple_explanation: groundedExp.simple_explanation,
+      very_simple_explanation: groundedExp.very_simple_explanation,
       risk_level: 'low',
       icon_name: 'FileText',
       one_line_consequence: '',
@@ -1859,21 +1866,21 @@ function classifyClauseType(text: string, title?: string): ClauseType {
 
   // Heading title checks FIRST if available
   if (titleLower) {
-    if (titleLower.includes('dispute') || titleLower.includes('arbitrat') || titleLower.includes('विवाद')) return 'dispute resolution/arbitration';
-    if (titleLower.includes('indemnit') || titleLower.includes('क्षतिपूर्ति')) return 'indemnity';
-    if (titleLower.includes('non-compete') || titleLower.includes('non compete')) return 'non-compete/non-solicitation';
-    if (titleLower.includes('security deposit') || titleLower.includes('deposit') || titleLower.includes('जमानत')) return 'security deposit';
-    if (titleLower.includes('rent escalation') || titleLower.includes('escalation')) return 'rent escalation';
-    if (titleLower.includes('notice period') || titleLower.includes('notice') || titleLower.includes('नोटिस')) return 'notice period';
-    if (titleLower.includes('maintenance') || titleLower.includes('repair')) return 'payment/consideration';
-    if (titleLower.includes('governing law') || titleLower.includes('jurisdiction') || titleLower.includes('क्षेत्राधिकार')) return 'governing law & jurisdiction';
-    if (titleLower.includes('stamp duty') || titleLower.includes('registration') || titleLower.includes('स्टाम्प')) return 'stamp duty & registration';
-    if (titleLower.includes('bond') || titleLower.includes('liquidated damages') || titleLower.includes('penalty') || titleLower.includes('बॉन्ड') || titleLower.includes('बॉण्ड') || titleLower.includes('प्रशिक्षण')) return 'penalty/liquidated damages';
-    if (titleLower.includes('confidential') || titleLower.includes('गोपनीय')) return 'confidentiality';
-    if (titleLower.includes('term') || titleLower.includes('probation') || titleLower.includes('lock-in') || titleLower.includes('duration') || titleLower.includes('परिवीक्षा')) return 'term & termination';
-    if (titleLower.includes('rent') || titleLower.includes('compensation') || titleLower.includes('salary') || titleLower.includes('payment') || titleLower.includes('repayment') || titleLower.includes('interest') || titleLower.includes('principal') || titleLower.includes('वेतन')) return 'payment/consideration';
-    if (titleLower.includes('premis') && titleLower.includes('term')) return 'term & termination';
-    if (titleLower.includes('parties') || titleLower.includes('recital') || titleLower.includes('रोजगार प्रस्ताव') || titleLower.includes('प्रिय श्री')) return 'parties & recitals';
+    if (titleLower.includes('dispute') || titleLower.includes('arbitrat') || titleLower.includes('विवाद')) return normalizeClauseType('dispute resolution/arbitration');
+    if (titleLower.includes('indemnit') || titleLower.includes('क्षतिपूर्ति')) return normalizeClauseType('indemnity');
+    if (titleLower.includes('non-compete') || titleLower.includes('non compete')) return normalizeClauseType('non-compete/non-solicitation');
+    if (titleLower.includes('security deposit') || titleLower.includes('deposit') || titleLower.includes('जमानत')) return normalizeClauseType('security deposit');
+    if (titleLower.includes('rent escalation') || titleLower.includes('escalation')) return normalizeClauseType('rent escalation');
+    if (titleLower.includes('notice period') || titleLower.includes('notice') || titleLower.includes('नोटिस')) return normalizeClauseType('notice period');
+    if (titleLower.includes('maintenance') || titleLower.includes('repair')) return 'maintenance & repairs';
+    if (titleLower.includes('governing law') || titleLower.includes('jurisdiction') || titleLower.includes('क्षेत्राधिकार')) return normalizeClauseType('governing law & jurisdiction');
+    if (titleLower.includes('stamp duty') || titleLower.includes('registration') || titleLower.includes('स्टाम्प')) return normalizeClauseType('stamp duty & registration');
+    if (titleLower.includes('bond') || titleLower.includes('liquidated damages') || titleLower.includes('penalty') || titleLower.includes('बॉन्ड') || titleLower.includes('बॉण्ड') || titleLower.includes('प्रशिक्षण')) return normalizeClauseType('penalty/liquidated damages');
+    if (titleLower.includes('confidential') || titleLower.includes('गोपनीय')) return normalizeClauseType('confidentiality');
+    if (titleLower.includes('term') || titleLower.includes('probation') || titleLower.includes('lock-in') || titleLower.includes('duration') || titleLower.includes('परिवीक्षा')) return normalizeClauseType('term & termination');
+    if (titleLower.includes('rent') || titleLower.includes('compensation') || titleLower.includes('salary') || titleLower.includes('payment') || titleLower.includes('repayment') || titleLower.includes('interest') || titleLower.includes('principal') || titleLower.includes('वेतन')) return normalizeClauseType('payment/consideration');
+    if (titleLower.includes('premis') && titleLower.includes('term')) return normalizeClauseType('term & termination');
+    if (titleLower.includes('parties') || titleLower.includes('recital') || titleLower.includes('रोजगार प्रस्ताव') || titleLower.includes('प्रिय श्री')) return normalizeClauseType('parties & recitals');
   }
 
   // Text-based checks
@@ -1885,55 +1892,55 @@ function classifyClauseType(text: string, title?: string): ClauseType {
     textLower.includes('रोजगार प्रस्ताव पत्र') ||
     textLower.includes('प्रिय श्री')
   ) {
-    return 'parties & recitals';
+    return normalizeClauseType('parties & recitals');
   }
 
   if (textLower.includes('arbitrat') || textLower.includes('dispute resolution') || textLower.includes('conciliation act') || textLower.includes('tribunal') || textLower.includes('विवाद')) {
-    return 'dispute resolution/arbitration';
+    return normalizeClauseType('dispute resolution/arbitration');
   }
 
   if (textLower.includes('indemn') || textLower.includes('hold harmless') || textLower.includes('क्षतिपूर्ति')) {
-    return 'indemnity';
+    return normalizeClauseType('indemnity');
   }
 
   if (textLower.includes('non-compete') || textLower.includes('competing business') || textLower.includes('restraint of trade') || textLower.includes('competitor')) {
-    return 'non-compete/non-solicitation';
+    return normalizeClauseType('non-compete/non-solicitation');
   }
 
   if (textLower.includes('confidential information') || textLower.includes('confidentiality') || textLower.includes('strict confidence') || textLower.includes('गोपनीय')) {
-    return 'confidentiality';
+    return normalizeClauseType('confidentiality');
   }
 
   if (textLower.includes('security deposit') || textLower.includes('interest-free deposit') || textLower.includes('deposit refund') || textLower.includes('deposit shall be refunded') || textLower.includes('सुरक्षा जमा')) {
-    return 'security deposit';
+    return normalizeClauseType('security deposit');
   }
 
   if (textLower.includes('rent escalation') || textLower.includes('increase by 5%') || textLower.includes('increase by 10%') || textLower.includes('annual escalation')) {
-    return 'rent escalation';
+    return normalizeClauseType('rent escalation');
   }
 
   if (textLower.includes('service bond') || textLower.includes('liquidated damages') || textLower.includes('training cost') || textLower.includes('early exit penalty') || textLower.includes('penalty') || textLower.includes('बॉन्ड') || textLower.includes('बॉण्ड') || textLower.includes('प्रशिक्षण लागत') || textLower.includes('पुनर्भुगतान')) {
-    return 'penalty/liquidated damages';
+    return normalizeClauseType('penalty/liquidated damages');
   }
 
   if (textLower.includes('notice period') || textLower.includes('days written notice') || textLower.includes('resignation notice') || textLower.includes('days notice') || textLower.includes('नोटिस अवधि') || textLower.includes('नोटिस')) {
-    return 'notice period';
+    return normalizeClauseType('notice period');
   }
 
   if (textLower.includes('maintenance') || textLower.includes('repairs')) {
-    return 'payment/consideration';
+    return 'maintenance & repairs';
   }
 
   if (textLower.includes('governing law') || textLower.includes('jurisdiction') || textLower.includes('courts at') || textLower.includes('courts in') || textLower.includes('क्षेत्राधिकार')) {
-    return 'governing law & jurisdiction';
+    return normalizeClauseType('governing law & jurisdiction');
   }
 
   if (textLower.includes('stamp paper') || textLower.includes('stamp duty') || textLower.includes('registration act') || textLower.includes('स्टाम्प')) {
-    return 'stamp duty & registration';
+    return normalizeClauseType('stamp duty & registration');
   }
 
   if (textLower.includes('probation') || textLower.includes('lock-in') || textLower.includes('term of') || textLower.includes('period of 11 months') || textLower.includes('commencing from') || textLower.includes('परिवीक्षा')) {
-    return 'term & termination';
+    return normalizeClauseType('term & termination');
   }
 
   if (
@@ -1948,14 +1955,14 @@ function classifyClauseType(text: string, title?: string): ClauseType {
     textLower.includes('प्रति माह') ||
     textLower.includes('माह')
   ) {
-    return 'payment/consideration';
+    return normalizeClauseType('payment/consideration');
   }
 
   return 'other';
 }
 
 export function synchronizeClauseRiskAndConsequence(clause: SimplifiedClause): SimplifiedClause {
-  let riskLevel = clause.risk_level;
+  let riskLevel: RiskLevel = normalizeRiskLevel(clause.risk_level);
   let iconName = clause.icon_name || 'CheckCircle';
   let consequence = clause.one_line_consequence || '';
 
@@ -1995,7 +2002,7 @@ export function synchronizeClauseRiskAndConsequence(clause: SimplifiedClause): S
     clause.clause_type === 'security deposit'
   ) {
     if (riskLevel !== 'high') {
-      riskLevel = 'medium';
+      riskLevel = 'watch_out';
       iconName = 'Clock';
     }
   }
@@ -2006,7 +2013,7 @@ export function synchronizeClauseRiskAndConsequence(clause: SimplifiedClause): S
     if (!consequence.toLowerCase().startsWith('high risk')) {
       consequence = `High Risk: ${consequence.replace(/^(safe clause|low risk|watch out|high risk):\s*/i, '')}`;
     }
-  } else if (riskLevel === 'medium') {
+  } else if (riskLevel === 'watch_out') {
     iconName = 'Clock';
     if (!consequence.toLowerCase().startsWith('watch out')) {
       consequence = `Watch Out: ${consequence.replace(/^(safe clause|low risk|watch out|high risk):\s*/i, '')}`;
@@ -2090,8 +2097,8 @@ Respond strictly in JSON with an object containing key "clause_risks", which is 
             const aiRisk = riskMap.get(clause.id);
             if (!aiRisk) return clause;
 
-            const finalRisk = aiRisk.risk_level;
-            const finalIcon = aiRisk.icon_name || (finalRisk === 'high' ? 'AlertOctagon' : finalRisk === 'medium' ? 'Clock' : 'CheckCircle');
+            const finalRisk = normalizeRiskLevel(aiRisk.risk_level);
+            const finalIcon = aiRisk.icon_name || (finalRisk === 'high' ? 'AlertOctagon' : finalRisk === 'watch_out' ? 'Clock' : 'CheckCircle');
             const consText = aiRisk.consequence || clause.one_line_consequence;
             const grounding = verifyGuard2aGrounding(clause.original_text, consText);
 
@@ -2119,7 +2126,7 @@ export function applyRiskTaggingAndGrounding(
   return clauses.map((clause) => {
     const textLower = clause.original_text.toLowerCase();
     const titleLower = clause.title.toLowerCase();
-    let riskLevel: 'low' | 'medium' | 'high' = 'low';
+    let riskLevel: RiskLevel = 'low';
     let iconName = 'CheckCircle';
     let rawConsequence = '';
 
@@ -2155,7 +2162,7 @@ export function applyRiskTaggingAndGrounding(
       clause.clause_type === 'security deposit' ||
       textLower.includes('security deposit')
     ) {
-      riskLevel = 'medium';
+      riskLevel = 'watch_out';
       iconName = 'Clock';
     } else {
       riskLevel = 'low';
@@ -2166,7 +2173,7 @@ export function applyRiskTaggingAndGrounding(
     if ((clause.clause_type === 'security deposit' || textLower.includes('security deposit')) && riskLevel !== 'high') {
       const hasSpecificDays = /\b(\d+)\s*(day|days|month|months|week|weeks)\b/i.test(textLower);
       if (!hasSpecificDays || textLower.includes('upon vacating') || textLower.includes('no specific refund deadline')) {
-        riskLevel = 'medium';
+        riskLevel = 'watch_out';
         iconName = 'Clock';
         rawConsequence = `Watch Out: Deposit refund upon vacating lacks a specific day timeframe/deadline, which could cause delay.`;
       } else {
@@ -2187,7 +2194,7 @@ export function applyRiskTaggingAndGrounding(
         } else {
           rawConsequence = `High Risk: Significant legal or financial exposure identified in this clause.`;
         }
-      } else if (riskLevel === 'medium') {
+      } else if (riskLevel === 'watch_out') {
         if (textLower.includes('lock-in')) {
           rawConsequence = `Watch Out: Mandatory lock-in period restricts early exit without financial penalty.`;
         } else if (textLower.includes('notice period') || textLower.includes('नोटिस अवधि')) {
@@ -2243,12 +2250,35 @@ function getClauseTypeLabel(clauseType: ClauseType): string {
   return clauseType.split('/').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' / ');
 }
 
-function generateSimpleExplanation(text: string, clauseType: ClauseType): string {
-  return `This clause defines terms for ${clauseType}. Context: ${text.slice(0, 100)}...`;
+export function generateGroundedHeuristicExplanation(
+  text: string,
+  clauseType: ClauseType,
+  title?: string,
+  language: string = 'en'
+): { simple_explanation: string; very_simple_explanation: string } {
+  const isHindi = language === 'hi';
+  const cleanTitle = title || getClauseTypeLabel(clauseType);
+  const snippet = text.replace(/\s+/g, ' ').trim().slice(0, 150);
+
+  if (isHindi) {
+    return {
+      simple_explanation: `यह खंड ${cleanTitle} की शर्तों और दायित्वों को स्पष्ट करता है: "${snippet}..."`,
+      very_simple_explanation: `${cleanTitle} की मुख्य नियम व शर्तें।`,
+    };
+  }
+
+  return {
+    simple_explanation: `This clause specifies binding obligations and terms for ${cleanTitle}: "${snippet}..."`,
+    very_simple_explanation: `Details key obligations under ${cleanTitle}.`,
+  };
 }
 
-function generateVerySimpleExplanation(text: string, clauseType: ClauseType): string {
-  return `This part explains rules for ${clauseType}.`;
+export function generateSimpleExplanation(text: string, clauseType: ClauseType, title?: string, language: string = 'en'): string {
+  return generateGroundedHeuristicExplanation(text, clauseType, title, language).simple_explanation;
+}
+
+export function generateVerySimpleExplanation(text: string, clauseType: ClauseType, title?: string, language: string = 'en'): string {
+  return generateGroundedHeuristicExplanation(text, clauseType, title, language).very_simple_explanation;
 }
 
 // Stage 4: Dedicated AI Synthesis & Briefing Packet Generation
@@ -2302,29 +2332,29 @@ Rule: Every simplified clause must have simple_explanation, very_simple_explanat
             parsed.lawyer_briefing &&
             parsed.disclaimer
           ) {
-          const mergedClauses = syncedInputClauses.map((baseClause, idx) => {
-            const aiClause = (parsed.clauses || []).find((c: any) => c.id === baseClause.id) || (parsed.clauses || [])[idx];
-            if (!aiClause) return baseClause;
-            return synchronizeClauseRiskAndConsequence({
-              ...baseClause,
-              title: aiClause.title && aiClause.title.length > 0 && !aiClause.title.toLowerCase().startsWith('clause ') ? aiClause.title : baseClause.title,
-              simple_explanation: aiClause.simple_explanation || baseClause.simple_explanation,
-              very_simple_explanation: aiClause.very_simple_explanation || baseClause.very_simple_explanation,
-              risk_level: baseClause.risk_level === 'high' ? 'high' : (aiClause.risk_level === 'high' || aiClause.risk_level === 'medium' ? aiClause.risk_level : baseClause.risk_level),
-              one_line_consequence: aiClause.one_line_consequence || baseClause.one_line_consequence,
-              clause_type: baseClause.clause_type,
+            const mergedClauses = syncedInputClauses.map((baseClause, idx) => {
+              const aiClause = (parsed.clauses || []).find((c: any) => c.id === baseClause.id) || (parsed.clauses || [])[idx];
+              if (!aiClause) return baseClause;
+              return synchronizeClauseRiskAndConsequence({
+                ...baseClause,
+                title: aiClause.title && aiClause.title.length > 0 && !aiClause.title.toLowerCase().startsWith('clause ') ? aiClause.title : baseClause.title,
+                simple_explanation: aiClause.simple_explanation || baseClause.simple_explanation,
+                very_simple_explanation: aiClause.very_simple_explanation || baseClause.very_simple_explanation,
+                risk_level: baseClause.risk_level === 'high' ? 'high' : (aiClause.risk_level === 'high' || aiClause.risk_level === 'medium' ? aiClause.risk_level : baseClause.risk_level),
+                one_line_consequence: aiClause.one_line_consequence || baseClause.one_line_consequence,
+                clause_type: baseClause.clause_type,
+              });
             });
-          });
 
-          const rawResult: DocumentAnalysisResult = {
-            guard1,
-            ...parsed,
-            clauses: mergedClauses,
-          };
+            const rawResult: DocumentAnalysisResult = {
+              guard1,
+              ...parsed,
+              clauses: mergedClauses,
+            };
 
-          return validateAndEnforceGroundedSynthesis(rawResult, mergedClauses);
+            return validateAndEnforceGroundedSynthesis(rawResult, mergedClauses);
+          }
         }
-      }
       } catch (e) {
         console.warn('Failed to parse AI JSON result, using hardened heuristic synthesis:', e);
       }
@@ -2332,8 +2362,20 @@ Rule: Every simplified clause must have simple_explanation, very_simple_explanat
   }
 
   // Hardened Grounded Heuristic Synthesis
-  const highRiskCount = syncedInputClauses.filter((c) => c.risk_level === 'high').length;
-  const mediumRiskCount = syncedInputClauses.filter((c) => c.risk_level === 'medium').length;
+  const fullySynthesizedClauses = syncedInputClauses.map((c) => {
+    if (!c.simple_explanation || !c.very_simple_explanation) {
+      const grounded = generateGroundedHeuristicExplanation(c.original_text, c.clause_type, c.title, language);
+      return {
+        ...c,
+        simple_explanation: c.simple_explanation || grounded.simple_explanation,
+        very_simple_explanation: c.very_simple_explanation || grounded.very_simple_explanation,
+      };
+    }
+    return c;
+  });
+
+  const highRiskCount = fullySynthesizedClauses.filter((c) => c.risk_level === 'high').length;
+  const mediumRiskCount = fullySynthesizedClauses.filter((c) => (c.risk_level as string) === 'medium' || c.risk_level === 'watch_out').length;
   const overallRiskScore = Math.min(95, 30 + highRiskCount * 25 + mediumRiskCount * 10);
   const docTitle = extractDocumentTitle(text, guard1.category);
 
@@ -2360,7 +2402,7 @@ Rule: Every simplified clause must have simple_explanation, very_simple_explanat
       id: `chk_${idx + 1}`,
       category: cat,
       title: `${c.title} (${getClauseTypeLabel(c.clause_type)})`,
-      description: c.one_line_consequence || c.simple_explanation,
+      description: c.one_line_consequence || c.simple_explanation || '',
       action_required: actionText,
       associated_clause_id: c.id,
     };
@@ -2369,16 +2411,16 @@ Rule: Every simplified clause must have simple_explanation, very_simple_explanat
   const questionsForLawyer: string[] = [];
   for (const c of syncedInputClauses) {
     const lower = (c.original_text + ' ' + c.title).toLowerCase();
-    if (c.clause_type === 'non-compete/non-solicitation' || lower.includes('non-compete')) {
+    if (c.clause_type === 'use & restrictions' || (c.clause_type as string) === 'non-compete/non-solicitation' || lower.includes('non-compete')) {
       questionsForLawyer.push(`Clause ${c.clause_number || c.id} (${c.title}): Is the post-employment non-compete restriction enforceable under Section 27 of the Indian Contract Act?`);
     }
     if (c.clause_type === 'penalty/liquidated damages' || lower.includes('bond') || lower.includes('liquidated damages')) {
       questionsForLawyer.push(`Clause ${c.clause_number || c.id} (${c.title}): Can the service bond liquidated damages training penalty be legally enforced without proof of actual specialized training costs?`);
     }
-    if (c.clause_type === 'indemnity' || lower.includes('indemnify')) {
+    if (c.clause_type === 'indemnity & liability' || (c.clause_type as string) === 'indemnity' || lower.includes('indemnify')) {
       questionsForLawyer.push(`Clause ${c.clause_number || c.id} (${c.title}): Does the broad indemnity clause expose the party to third-party claims or damage beyond direct operational control?`);
     }
-    if (c.clause_type === 'security deposit' && (c.risk_level === 'medium' || lower.includes('upon vacating'))) {
+    if (c.clause_type === 'security deposit' && (c.risk_level === 'watch_out' || (c.risk_level as string) === 'medium' || lower.includes('upon vacating'))) {
       questionsForLawyer.push(`Clause ${c.clause_number || c.id} (${c.title}): Should a specific 30-day refund deadline be added to prevent indefinite deposit retention upon vacating?`);
     }
     if (c.clause_type === 'term & termination' && lower.includes('lock-in')) {
@@ -2453,9 +2495,9 @@ Rule: Every simplified clause must have simple_explanation, very_simple_explanat
     document_title: docTitle,
     category: guard1.category,
     overall_risk_score: overallRiskScore,
-    summary_simple: `${docTitle} analyzed with ${syncedInputClauses.length} primary clauses extracted. Found ${highRiskCount} high risk clause(s).`,
-    summary_very_simple: `This document has ${syncedInputClauses.length} main sections with ${highRiskCount} high risk warning(s).`,
-    clauses: syncedInputClauses,
+    summary_simple: `${docTitle} analyzed with ${fullySynthesizedClauses.length} primary clauses extracted. Found ${highRiskCount} high risk clause(s).`,
+    summary_very_simple: `This document has ${fullySynthesizedClauses.length} main sections with ${highRiskCount} high risk warning(s).`,
+    clauses: fullySynthesizedClauses,
     contradictions: [],
     checklist: {
       title: 'Action & Deadline Checklist',
@@ -2466,7 +2508,7 @@ Rule: Every simplified clause must have simple_explanation, very_simple_explanat
     },
     options_next_steps: optionsNextSteps,
     lawyer_briefing: {
-      document_summary: `${docTitle} containing ${syncedInputClauses.length} clauses with ${highRiskCount} high-risk flags.`,
+      document_summary: `${docTitle} containing ${fullySynthesizedClauses.length} clauses with ${highRiskCount} high-risk flags.`,
       flagged_issues: [],
       questions_to_ask_lawyer: questionsForLawyer,
       missing_protective_clauses: [],
@@ -2476,7 +2518,7 @@ Rule: Every simplified clause must have simple_explanation, very_simple_explanat
     disclaimer: 'LegalLens AI analysis provided for informational purposes only under Advocate Act 1961.',
   };
 
-  return validateAndEnforceGroundedSynthesis(rawSynthesis, syncedInputClauses);
+  return validateAndEnforceGroundedSynthesis(rawSynthesis, fullySynthesizedClauses);
 }
 
 export function validateAndEnforceGroundedSynthesis(
@@ -2500,7 +2542,7 @@ export function validateAndEnforceGroundedSynthesis(
   const validatedMissingClauses = currentMissing.filter((item) => {
     const itemLower = item.toLowerCase();
     if (itemLower.includes('dispute') || itemLower.includes('arbitrat')) {
-      const exists = syncedClauses.some((c) => c.clause_type === 'dispute resolution/arbitration' || /arbitrat|dispute resolution/i.test(c.original_text + ' ' + c.title));
+      const exists = syncedClauses.some((c) => (c.clause_type as string) === 'dispute resolution/arbitration' || c.clause_type.includes('dispute') || c.clause_type.includes('governing law') || /arbitrat|dispute resolution/i.test(c.original_text + ' ' + c.title));
       if (exists) return false;
     }
     if (itemLower.includes('notice')) {
@@ -2512,7 +2554,7 @@ export function validateAndEnforceGroundedSynthesis(
       if (exists) return false;
     }
     if (itemLower.includes('indemnit')) {
-      const exists = syncedClauses.some((c) => c.clause_type === 'indemnity' || /indemnit/i.test(c.original_text + ' ' + c.title));
+      const exists = syncedClauses.some((c) => (c.clause_type as string) === 'indemnity' || c.clause_type === 'indemnity & liability' || /indemnit/i.test(c.original_text + ' ' + c.title));
       if (exists) return false;
     }
     if (itemLower.includes('confidential')) {
@@ -2532,6 +2574,60 @@ export function validateAndEnforceGroundedSynthesis(
       missing_protective_clauses: validatedMissingClauses,
     },
   };
+}
+
+export function detectCrossClauseConflicts(
+  clauses: SimplifiedClause[],
+  fullText: string = ''
+): {
+  conflicts: InternalContradiction[];
+  executionBlock: ExecutionBlockAnalysis;
+} {
+  const conflicts: InternalContradiction[] = [];
+  const textLower = fullText.toLowerCase();
+
+  const termClause = clauses.find(
+    (c) => c.clause_type.includes('term') || c.title.toLowerCase().includes('term') || c.original_text.toLowerCase().includes('lock-in')
+  );
+  const noticeClause = clauses.find(
+    (c) => c.clause_type.includes('notice') || c.title.toLowerCase().includes('notice') || c.original_text.toLowerCase().includes('notice')
+  );
+
+  if (
+    termClause &&
+    noticeClause &&
+    termClause.id !== noticeClause.id &&
+    (termClause.original_text.toLowerCase().includes('lock-in') || termClause.original_text.toLowerCase().includes('lock in')) &&
+    (noticeClause.original_text.toLowerCase().includes('notice') || noticeClause.title.toLowerCase().includes('notice'))
+  ) {
+    conflicts.push({
+      id: 'conflict_lockin_notice',
+      clause_a_id: termClause.id,
+      clause_b_id: noticeClause.id,
+      clause_a_title: termClause.title,
+      clause_b_title: noticeClause.title,
+      clause_a_obligation: 'Mandatory lock-in period prohibits early exit.',
+      clause_b_obligation: 'Right to terminate with written notice.',
+      description: 'Lock-in Period vs Notice Period Exit Collision',
+      explanation: `Contradiction detected between ${termClause.title} (lock-in restrictions) and ${noticeClause.title} (written notice exit right).`,
+      risk_level: 'high',
+    });
+  }
+
+  const witnessMissing =
+    !textLower.includes('witness') &&
+    !textLower.includes('gawah') &&
+    !textLower.includes('गवाह') &&
+    !textLower.includes('attested');
+
+  const executionBlock: ExecutionBlockAnalysis = {
+    present: textLower.includes('signed') || textLower.includes('in witness whereof') || textLower.includes('lessor') || textLower.includes('lessee'),
+    missing_signatures: !textLower.includes('signed') && !textLower.includes('signature'),
+    witness_attestation_missing: witnessMissing,
+    defect_description: witnessMissing ? 'Witness signature / attestation block is missing.' : undefined,
+  };
+
+  return { conflicts, executionBlock };
 }
 
 export async function analyzeDocumentText(
@@ -2654,19 +2750,42 @@ export async function answerDocumentQuestion(
     });
   }
 
-  // Build active input pipeline context (uploaded file / camera photo / pasted text)
+  // Build active input pipeline context (uploaded file / camera photo / pasted text / comparison mode)
   let activeInputSummary = '';
   if (inputContext) {
-    if (inputContext.uploadedFileName) {
-      activeInputSummary += `\n- CURRENT UPLOADED INPUT FILE: "${inputContext.uploadedFileName}" (Size: ${inputContext.uploadedFileSize || 'Unknown'}, Type: ${inputContext.uploadedFileType || 'File'}). Status: File is uploaded/selected in the Document Capture section.`;
-    }
-    if (inputContext.extractedInputText) {
-      activeInputSummary += `\n- EXTRACTED INNER FILE CONTENT / TEXT:\n"""\n${inputContext.extractedInputText.slice(0, 3000)}\n"""`;
-    } else if (inputContext.pastedText) {
-      activeInputSummary += `\n- CURRENT PASTED INPUT TEXT:\n"""\n${inputContext.pastedText.slice(0, 3000)}\n"""`;
-    }
-    if (inputContext.capturedPhoto) {
-      activeInputSummary += `\n- CURRENT CAMERA SNAPSHOT: Image captured via phone/webcam camera in Document Capture section.`;
+    if (inputContext.isComparisonMode || inputContext.docAText || inputContext.docBText) {
+      activeInputSummary += `\n======================================================================
+ACTIVE MODE: COMPARE CONTRACTS SECTION (DUAL-DOCUMENT GROUNDING)
+======================================================================`;
+      if (inputContext.docAText) {
+        activeInputSummary += `\n- DOCUMENT A (${inputContext.docATitle || 'Document A'}):\n"""\n${inputContext.docAText.slice(0, 5000)}\n"""`;
+      } else {
+        activeInputSummary += `\n- DOCUMENT A: [No text entered yet]`;
+      }
+
+      if (inputContext.docBText) {
+        activeInputSummary += `\n- DOCUMENT B (${inputContext.docBTitle || 'Document B'}):\n"""\n${inputContext.docBText.slice(0, 5000)}\n"""`;
+      } else {
+        activeInputSummary += `\n- DOCUMENT B: [No text entered yet]`;
+      }
+
+      if (inputContext.comparisonResult) {
+        activeInputSummary += `\n- EXECUTED COMPARISON SUMMARY:
+  • Recommendation: ${inputContext.comparisonResult.winner_recommendation}
+  • Key Differences: ${inputContext.comparisonResult.key_differences_summary}`;
+      }
+    } else {
+      if (inputContext.uploadedFileName) {
+        activeInputSummary += `\n- CURRENT UPLOADED INPUT FILE: "${inputContext.uploadedFileName}" (Size: ${inputContext.uploadedFileSize || 'Unknown'}, Type: ${inputContext.uploadedFileType || 'File'}). Status: File is uploaded/selected in the Document Capture section.`;
+      }
+      if (inputContext.extractedInputText) {
+        activeInputSummary += `\n- EXTRACTED INNER FILE CONTENT / TEXT:\n"""\n${inputContext.extractedInputText.slice(0, 3000)}\n"""`;
+      } else if (inputContext.pastedText) {
+        activeInputSummary += `\n- CURRENT PASTED INPUT TEXT:\n"""\n${inputContext.pastedText.slice(0, 3000)}\n"""`;
+      }
+      if (inputContext.capturedPhoto) {
+        activeInputSummary += `\n- CURRENT CAMERA SNAPSHOT: Image captured via phone/webcam camera in Document Capture section.`;
+      }
     }
   }
 
@@ -2700,18 +2819,25 @@ ${document?.clauses && document.clauses.length > 0
             `[Clause ID: ${c.id} | Title: ${c.title}]\nOriginal: ${c.original_text}\nExplanation: ${c.simple_explanation}\nRisk: ${c.risk_level}\nConsequence: ${c.one_line_consequence}`
         )
         .join('\n---\n')
-      : 'No document analysis generated yet.'}
+      : 'No single document analysis generated yet.'}
 
-ACTIVE INPUT PIPELINE CONTEXT (DOCUMENT CAPTURE SECTION):
-${activeInputSummary || 'No file or text currently selected in Document Capture.'}
+ACTIVE INPUT PIPELINE & COMPARISON CONTEXT:
+${activeInputSummary || 'No file or text currently selected.'}
 
 SYSTEM INSTRUCTIONS & FORMATTING GUARDRAILS:
 1. Be helpful, intelligent, dynamic, and conversational like ChatGPT or Gemini.
-2. If the user asks about what file, image, PDF, or text they uploaded/pasted in Document Capture, OR asks to examine/summarize/explain the contents of their uploaded file/image BEFORE clicking "Analyze Document", use ACTIVE INPUT PIPELINE CONTEXT above (which contains the exact extracted inner text of the file) to answer their question directly, accurately, and pleasantly.
+2. If the user asks about what file, image, PDF, or text they uploaded/pasted, use ACTIVE INPUT PIPELINE & COMPARISON CONTEXT above to answer directly.
 3. If an analyzed document exists, answer questions about contract clauses, rent, deposit, notice, or legal terms using DOCUMENT GROUNDING CONTEXT above and reference relevant clauses.
-4. CLEAN TYPOGRAPHY: Do NOT wrap headings or phrases in raw double asterisks (avoid raw **bolding**). Use clean section headings, capital headers, or bullet points (•) for structural hierarchy.
-5. PROPER TABLE RENDERING: When outputting structured legal breakdowns, clause comparisons, or term metrics, format them as clean standard Markdown tables using pipes (| Header 1 | Header 2 |) and alignment rows (| --- | --- |). Do NOT output loose pipes (||) or broken text blocks.
-6. Always maintain a clear, reassuring, and plain-language tone.
+4. COMPARE CONTRACTS MODE INSTRUCTIONS:
+   - When in Compare Contracts mode (or when Document A / Document B context is provided above):
+   - Direct questions about Document A specifically: Answer based on Document A text and clearly label with "[Doc A]" or "In Document A...".
+   - Direct questions about Document B specifically: Answer based on Document B text and clearly label with "[Doc B]" or "In Document B...".
+   - Ambiguous/General questions (e.g., "What is the notice period?", "What is the penalty?"): Default to answering for BOTH Document A and Document B side-by-side in a clean comparison table or labeled sections ([Document A] vs [Document B]).
+   - If only one document (A or B) is currently loaded, answer based on the available document without erroring.
+   - If NEITHER Document A nor Document B has text loaded, politely advise the user to paste or upload Document A or Document B to analyze.
+5. CLEAN TYPOGRAPHY: Do NOT wrap headings or phrases in raw double asterisks (avoid raw **bolding**). Use clean section headings, capital headers, or bullet points (•) for structural hierarchy.
+6. PROPER TABLE RENDERING: When outputting structured legal breakdowns, clause comparisons, or term metrics, format them as clean standard Markdown tables using pipes (| Header 1 | Header 2 |) and alignment rows (| --- | --- |). Do NOT output loose pipes (||) or broken text blocks.
+7. Always maintain a clear, reassuring, and plain-language tone.
 ${langPromptInstruction}`;
 
   const formattedUserPrompt = isHindi

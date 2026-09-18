@@ -50,7 +50,7 @@ export const SAMPLE_RENTAL_AGREEMENT: DocumentAnalysisResult = {
     {
       id: 'clause_3',
       clause_number: '3',
-      clause_type: 'rent escalation',
+      clause_type: 'rent & payment',
       title: 'Rent Escalation Clause',
       original_text:
         'The monthly rent shall be ₹25,000 payable on or before the 5th of each month. Upon completion of 11 months, the rent shall automatically increase by 10%.',
@@ -58,7 +58,7 @@ export const SAMPLE_RENTAL_AGREEMENT: DocumentAnalysisResult = {
         'Rent is ₹25,000 due by the 5th of every month. Rent goes up by 10% (to ₹27,500) if renewed after 11 months.',
       very_simple_explanation:
         'Pay ₹25,000 rent before 5th date each month. After 11 months, rent increases to ₹27,500.',
-      risk_level: 'medium',
+      risk_level: 'watch_out',
       icon_name: 'TrendingUp',
       one_line_consequence:
         'Watch Out: 10% rent increase is higher than standard 5% annual market rate in Bengaluru.',
@@ -93,7 +93,7 @@ export const SAMPLE_RENTAL_AGREEMENT: DocumentAnalysisResult = {
         'Agreement is printed on ₹100 stamp paper but NOT registered with the Sub-Registrar office.',
       very_simple_explanation:
         'This paper is made on ₹100 stamp paper. It is not registered at government court office.',
-      risk_level: 'medium',
+      risk_level: 'watch_out',
       icon_name: 'FileCheck',
       one_line_consequence:
         'Watch Out: Under Karnataka Stamp Rules, lease agreements exceeding 11 months require formal registration to be admissible in court.',
@@ -104,6 +104,10 @@ export const SAMPLE_RENTAL_AGREEMENT: DocumentAnalysisResult = {
       id: 'contra_1',
       clause_a_id: 'clause_2',
       clause_b_id: 'clause_4',
+      clause_a_title: 'Security Deposit & Return Conditions',
+      clause_b_title: 'Lock-in Period & Termination Notice',
+      clause_a_obligation: 'Deposit returned within 45 days after vacancy.',
+      clause_b_obligation: 'Entire deposit forfeited if leaving during lock-in period.',
       description: 'Deposit Return vs Lock-in Penalty Conflict',
       explanation:
         'Clause 2 states the deposit is refundable within 45 days, but Clause 4 completely forfeits the deposit if vacating within 6 months. Ensure lock-in terms are clearly understood before signing.',
@@ -258,7 +262,7 @@ export const SAMPLE_EMPLOYMENT_CONTRACT: DocumentAnalysisResult = {
     {
       id: 'emp_3',
       clause_number: '3',
-      clause_type: 'non-compete/non-solicitation',
+      clause_type: 'use & restrictions',
       title: 'Post-Employment Non-Compete Restriction',
       original_text:
         'During employment and for 24 months post-termination, Employee shall not work for any competitor or start any competing business in India.',
@@ -282,7 +286,7 @@ export const SAMPLE_EMPLOYMENT_CONTRACT: DocumentAnalysisResult = {
         'Requires 3 months notice to resign. Company must approve if you want to pay money instead of serving notice.',
       very_simple_explanation:
         'Tell company 3 months before resigning. Paying money to leave early requires company approval.',
-      risk_level: 'medium',
+      risk_level: 'watch_out',
       icon_name: 'Clock',
       one_line_consequence:
         'Watch Out: 90-day notice period is long and can delay joining your next employer.',

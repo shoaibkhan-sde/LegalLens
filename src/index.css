@@ -288,7 +288,71 @@ label,
 
 @media (prefers-reduced-motion: reduce) {
   .animate-footer-drift,
-  .animate-arrow-lift {
+  .animate-arrow-lift,
+  .animate-soundwave-1,
+  .animate-soundwave-2,
+  .animate-soundwave-3,
+  .animate-mic-active,
+  .animate-mic-shake {
     animation: none !important;
+    transform: none !important;
   }
+}
+
+/* Dynamic Mic Icon Animations & Soundwave Visualizer */
+@keyframes micSoundwaveScale {
+  0%, 100% {
+    transform: scaleY(0.35);
+    opacity: 0.65;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+@keyframes micAuraPulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.85;
+    box-shadow: 0 0 0 0 rgba(184, 92, 56, 0.4);
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 1;
+    box-shadow: 0 0 12px 3px rgba(184, 92, 56, 0.55);
+  }
+}
+
+@keyframes micShakeAlert {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-3px); }
+  40%, 80% { transform: translateX(3px); }
+}
+
+.animate-soundwave-1 {
+  animation: micSoundwaveScale 0.75s ease-in-out infinite 0s;
+  transform-origin: bottom;
+  will-change: transform, opacity;
+}
+
+.animate-soundwave-2 {
+  animation: micSoundwaveScale 0.75s ease-in-out infinite 0.2s;
+  transform-origin: bottom;
+  will-change: transform, opacity;
+}
+
+.animate-soundwave-3 {
+  animation: micSoundwaveScale 0.75s ease-in-out infinite 0.4s;
+  transform-origin: bottom;
+  will-change: transform, opacity;
+}
+
+.animate-mic-active {
+  animation: micAuraPulse 1.8s ease-in-out infinite;
+  will-change: transform, opacity, box-shadow;
+}
+
+.animate-mic-shake {
+  animation: micShakeAlert 0.45s ease-in-out 2;
 }

@@ -53,6 +53,33 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
     return 'upload';
   });
 
+  // Clean ?mode=camera and #camera from URL immediately on initial load to prevent re-triggering on refresh
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    try {
+      const url = new URL(window.location.href);
+      let urlChanged = false;
+
+      if (url.searchParams.has('mode')) {
+        url.searchParams.delete('mode');
+        urlChanged = true;
+      }
+
+      if (url.hash === '#camera') {
+        url.hash = '';
+        urlChanged = true;
+      }
+
+      if (urlChanged) {
+        const cleanUrl = url.pathname + (url.search ? url.search : '') + (url.hash ? url.hash : '');
+        window.history.replaceState(window.history.state, '', cleanUrl);
+      }
+    } catch (err) {
+      console.warn('Failed to clean URL parameters:', err);
+    }
+  }, []);
+
   useEffect(() => {
     const handleResize = () => {
       const mobileState = isMobileDevice();
@@ -91,13 +118,17 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
         try {
           const arrayBuffer = await uploadedFile.arrayBuffer();
           const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+          if (pdfDoc.isEncrypted) {
+            setExtractedFileText("Password-protected PDF detected. Please upload an unencrypted document.");
+            return;
+          }
           const pageCount = pdfDoc.getPageCount();
           if (pageCount > MAX_PDF_PAGES) {
             setExtractedFileText(MAX_PDF_PAGES_ERROR_MSG);
             return;
           }
         } catch {
-          // If load fails on client, server authoritative check will handle it
+          // If load fails on client, backend authoritative check is the source of truth
         }
       }
 
@@ -497,21 +528,15 @@ The Lessee agrees to defend, indemnify, and hold harmless the Lessor against all
 
           {/* Desktop Phone Handoff Card (Only shown on Desktop/Laptop screens) */}
           {!isMobile && (
-            <div
-              onClick={() => setShowQrModal(true)}
-              className="hidden md:flex items-center justify-between bg-[#F6F1E7] hover:bg-[#E7E1D3]/50 p-3 rounded-xl border border-[#E7E1D3] hover:border-[#B85C38]/40 text-xs transition-all duration-200 cursor-pointer group shadow-xs"
-            >
+            <div className="hidden md:flex items-center justify-between bg-[#F6F1E7] p-3 rounded-xl border border-[#E7E1D3] text-xs shadow-xs">
               <div className="flex items-center space-x-2">
-                <Smartphone className="w-4 h-4 text-[#B85C38] shrink-0 group-hover:scale-110 transition-transform" />
+                <Smartphone className="w-4 h-4 text-[#B85C38] shrink-0" />
                 <span className="text-[#1E1B17] font-medium">{t('capture.phone_prompt')}</span>
               </div>
               <button
                 type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowQrModal(true);
-                }}
-                className="px-2.5 py-1 bg-[#FBF8F1] group-hover:bg-[#B85C38] text-[#1E1B17] group-hover:text-white text-[11px] font-semibold rounded border border-[#E7E1D3] group-hover:border-[#B85C38] flex items-center space-x-1 transition-all duration-200 shrink-0 cursor-pointer shadow-xs"
+                onClick={() => setShowQrModal(true)}
+                className="group px-2.5 py-1 bg-[#FBF8F1] hover:bg-[#B85C38] text-[#1E1B17] hover:text-white text-[11px] font-semibold rounded border border-[#E7E1D3] hover:border-[#B85C38] flex items-center space-x-1 transition-all duration-200 shrink-0 cursor-pointer shadow-xs"
               >
                 <QrCode className="w-3.5 h-3.5 text-[#B85C38] group-hover:text-white transition-colors" />
                 <span>{t('capture.snap_phone')}</span>

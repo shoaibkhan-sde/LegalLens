@@ -15,20 +15,94 @@ import { RoboAiAssistant } from './components/RoboAiAssistant';
 import { Footer } from './components/Footer';
 
 import { ApiClient } from './services/apiClient';
+import { SpeechEngine } from './utils/speech';
 import { DocumentAnalysisResult, SimplifiedClause, ServerConfigStatus, ActiveInputContext } from './types/schemas';
-import { ShieldCheck, Layers, AlertOctagon, Zap, Sparkles, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, Layers, AlertOctagon, Zap, Sparkles, ChevronLeft, ChevronRight } from 'lucide-react';
 
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
 
+const TAB_STORAGE_KEY = 'legallens_active_tab';
+
+const getTabFromPathOrStorage = (): 'analyze' | 'compare' | 'legal_aid' => {
+  if (typeof window === 'undefined') return 'analyze';
+
+  // 1. Check URL pathname first
+  const path = window.location.pathname.toLowerCase().replace(/\/$/, '');
+  if (path === '/compare') return 'compare';
+  if (path === '/legal-aid' || path === '/free-legal-help' || path === '/legalaid') return 'legal_aid';
+  if (path === '/analyze') return 'analyze';
+
+  // 2. Check URL hash fallback (#compare, #legal-aid, #analyze)
+  const hash = window.location.hash.toLowerCase().replace('#', '');
+  if (hash === 'compare') return 'compare';
+  if (hash === 'legal-aid' || hash === 'free-legal-help' || hash === 'legalaid') return 'legal_aid';
+  if (hash === 'analyze') return 'analyze';
+
+  // 3. Check localStorage fallback
+  try {
+    const saved = localStorage.getItem(TAB_STORAGE_KEY);
+    if (saved === 'compare' || saved === 'legal_aid' || saved === 'analyze') {
+      return saved;
+    }
+  } catch { }
+
+  return 'analyze';
+};
+
 function AppContent() {
   const { t } = useLanguage();
-  const [activeTab, setActiveTab] = useState<'analyze' | 'compare' | 'legal_aid'>('analyze');
+  const [activeTab, setActiveTabState] = useState<'analyze' | 'compare' | 'legal_aid'>(getTabFromPathOrStorage);
   const [readingLevel, setReadingLevel] = useState<'simple' | 'very_simple'>('simple');
-  const [configStatus, setConfigStatus] = useState<ServerConfigStatus>({
-    isConfigured: false,
-    demoMode: true,
+  const [configStatus, setConfigStatus] = useState<ServerConfigStatus>(() => {
+    try {
+      const saved = localStorage.getItem('legallens_config_status');
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch { }
+    return {
+      isConfigured: true,
+      demoMode: false,
+    };
   });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  const handleSelectTab = (tab: 'analyze' | 'compare' | 'legal_aid', pushHistory = true) => {
+    setActiveTabState(tab);
+    try {
+      localStorage.setItem(TAB_STORAGE_KEY, tab);
+    } catch { }
+
+    if (typeof window !== 'undefined' && pushHistory) {
+      const targetPath = tab === 'compare' ? '/compare' : tab === 'legal_aid' ? '/legal-aid' : '/analyze';
+      if (window.location.pathname !== targetPath) {
+        window.history.pushState({ tab }, '', targetPath);
+      }
+    }
+  };
+
+  useEffect(() => {
+    SpeechEngine.registerGestureUnlock();
+
+    if (typeof window !== 'undefined') {
+      const targetPath = activeTab === 'compare' ? '/compare' : activeTab === 'legal_aid' ? '/legal-aid' : '/analyze';
+      if (window.location.pathname === '/' || window.location.pathname === '') {
+        const fullTargetPath = targetPath + window.location.search + window.location.hash;
+        window.history.replaceState({ tab: activeTab }, '', fullTargetPath);
+      }
+    }
+
+    const handlePopState = () => {
+      const currentTab = getTabFromPathOrStorage();
+      setActiveTabState(currentTab);
+      try {
+        localStorage.setItem(TAB_STORAGE_KEY, currentTab);
+      } catch { }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   const [documentAnalysis, setDocumentAnalysis] = useState<DocumentAnalysisResult | null>(null);
   const [activeInputContext, setActiveInputContext] = useState<ActiveInputContext | null>(null);
@@ -113,7 +187,12 @@ function AppContent() {
   }, []);
 
   useEffect(() => {
-    ApiClient.getConfigStatus().then((status) => setConfigStatus(status));
+    ApiClient.getConfigStatus().then((status) => {
+      setConfigStatus(status);
+      try {
+        localStorage.setItem('legallens_config_status', JSON.stringify(status));
+      } catch { }
+    });
 
     // Prefetch Compare & Legal Aid illustrations ahead of time in background
     const prefetchAssets = () => {
@@ -286,7 +365,7 @@ function AppContent() {
         readingLevel={readingLevel}
         onToggleReadingLevel={setReadingLevel}
         activeTab={activeTab}
-        onSelectTab={setActiveTab}
+        onSelectTab={handleSelectTab}
         onPrefetchTab={handlePrefetchTab}
         configStatus={configStatus}
         onOpenSettings={() => setIsSettingsOpen(true)}
@@ -331,6 +410,7 @@ function AppContent() {
             {!isChatOpen && (
               <div className="flex justify-end pr-2 -mb-4">
                 <RoboAiAssistant
+                  sectionId="analyze"
                   document={documentAnalysis}
                   inputContext={activeInputContext}
                   onVerifyClause={handleVerifyInDocument}
@@ -359,6 +439,7 @@ function AppContent() {
                   className="lg:col-span-6 transition-all duration-300 animate-fade-in-up relative min-h-[500px] lg:min-h-0 scroll-mt-6"
                 >
                   <RoboAiAssistant
+                    sectionId="analyze"
                     document={documentAnalysis}
                     inputContext={activeInputContext}
                     onVerifyClause={handleVerifyInDocument}
@@ -383,12 +464,77 @@ function AppContent() {
             {/* Document Analysis Dashboard Workspace */}
             {documentAnalysis && !isLoading && (
               <div className="space-y-6">
+                {/* Summary Overview Banner (Placed immediately below Uploader button) */}
+                <div className="bg-[#FBF8F1] border border-[#E7E1D3] rounded-2xl p-5 md:p-6 shadow-xs space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E7E1D3] pb-3">
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <span className="text-[10px] uppercase font-bold text-[#B85C38] bg-[#B85C38]/10 px-2.5 py-0.5 rounded border border-[#B85C38]/20">
+                          {documentAnalysis.category || 'Legal Document'}
+                        </span>
+                        <span className="text-[11px] text-[#065F46] font-semibold flex items-center space-x-1">
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          <span>Guard 1 Verified</span>
+                        </span>
+                      </div>
+                      <h2 className="text-xl font-bold font-heading text-[#1E1B17] mt-1">
+                        {documentAnalysis.document_title || 'Legal Agreement'}
+                      </h2>
+                    </div>
+
+                    {/* Overall Risk Score Pill */}
+                    {(() => {
+                      const overallScore = typeof documentAnalysis?.overall_risk_score === 'number' && !isNaN(documentAnalysis.overall_risk_score)
+                        ? documentAnalysis.overall_risk_score
+                        : 0;
+                      const riskText = overallScore > 60 ? 'High Risk' : overallScore > 30 ? 'Moderate Risk' : 'Low Risk';
+                      const riskBadgeColor = overallScore > 60
+                        ? 'bg-[#FFF5F5] text-[#991B1B] border border-[#FCA5A5]'
+                        : overallScore > 30
+                          ? 'bg-[#FFFBEB] text-[#92400E] border border-[#FDE68A]'
+                          : 'bg-[#ECFDF5] text-[#065F46] border border-[#6EE7B7]';
+                      return (
+                        <div className="flex flex-wrap items-center gap-2 bg-[#F6F1E7] px-3.5 py-1.5 rounded-lg border border-[#E7E1D3]">
+                          <span className="text-xs font-medium text-[#6E6659]">Risk Assessment:</span>
+                          <span
+                            className={`text-xs font-bold px-2.5 py-0.5 rounded flex items-center space-x-1 ${riskBadgeColor}`}
+                          >
+                            <AlertOctagon className="w-3.5 h-3.5 mr-1" />
+                            <span>
+                              {riskText} ({overallScore}/100)
+                            </span>
+                          </span>
+                          {(documentAnalysis.conflicts || documentAnalysis.contradictions || []).length > 0 && (
+                            <span className="text-xs font-bold px-2.5 py-0.5 rounded bg-[#FEF2F2] text-[#991B1B] border border-[#FCA5A5] flex items-center space-x-1">
+                              <ShieldAlert className="w-3.5 h-3.5 mr-1" />
+                              <span>{(documentAnalysis.conflicts || documentAnalysis.contradictions || []).length} Cross-Clause Conflict(s)</span>
+                            </span>
+                          )}
+                          {documentAnalysis.execution_block?.witness_attestation_missing && (
+                            <span className="text-xs font-bold px-2.5 py-0.5 rounded bg-[#FFFBEB] text-[#92400E] border border-[#FDE68A] flex items-center space-x-1">
+                              <AlertOctagon className="w-3.5 h-3.5 mr-1" />
+                              <span>Execution Block: Witness Attestation Missing</span>
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  <p className="text-xs md:text-sm text-[#1E1B17] font-medium leading-relaxed">
+                    {(readingLevel === 'very_simple'
+                      ? documentAnalysis.summary_very_simple || documentAnalysis.summary_simple
+                      : documentAnalysis.summary_simple || documentAnalysis.summary_very_simple) ||
+                      `${documentAnalysis.document_title || 'Legal Agreement'} analyzed with ${(documentAnalysis.clauses || []).length} primary clauses extracted.`}
+                  </p>
+                </div>
+
                 {/* Responsive Multi-Pane Grid Layout */}
                 {/* Desktop: 2-Column Multi-pane workspace | Mobile: Stacked 1-thing-at-a-time */}
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                  {/* Left Column: Sticky Original Document Viewer with Tap-to-Verify */}
+                  {/* Left Column: Direct Grid Item with lg:sticky */}
                   <div
-                    className="lg:col-span-5 lg:sticky self-start h-[440px] transition-all duration-300"
+                    className="lg:col-span-5 lg:sticky h-[440px]"
                     style={{ top: `${baseStickyTop}px` }}
                   >
                     <DocumentViewer
@@ -410,10 +556,7 @@ function AppContent() {
                     const activeClause = clausesList[activeIndex] || clausesList[0];
 
                     return (
-                      <div
-                        className="lg:col-span-7 lg:sticky self-start space-y-4 transition-all duration-300"
-                        style={{ top: `${baseStickyTop}px` }}
-                      >
+                      <div className="lg:col-span-7 space-y-4">
                         {/* Control & Quick Jump Deck Bar */}
                         <div className="bg-[#FBF8F1]/95 backdrop-blur-md px-4 py-3 border-2 border-[#E7E1D3] rounded-[24px] shadow-md space-y-2.5">
                           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -509,28 +652,33 @@ function AppContent() {
                               {clausesList.map((c, i) => (
                                 <button
                                   key={`deck-jump-${c.id}`}
+                                  data-testid={`deck-jump-chip-${c.id}`}
                                   ref={(el) => {
                                     deckJumpPillRefs.current[i] = el;
                                   }}
                                   onClick={() => handleVerifyInDocument(c.id, i)}
-                                  className={`px-2.5 py-1 rounded-full border text-[11px] font-semibold shrink-0 transition-all cursor-pointer shadow-2xs active:scale-95 my-0.5 ${i === activeIndex
+                                  title={`${i + 1}. ${c.title} (${c.clause_type})`}
+                                  className={`px-3 py-1 rounded-full border text-[11px] font-semibold shrink-0 transition-all cursor-pointer shadow-2xs active:scale-95 my-0.5 max-w-[220px] flex items-center space-x-1.5 ${i === activeIndex
                                     ? 'bg-[#B85C38] text-white border-[#B85C38] font-bold ring-2 ring-[#B85C38]/30 scale-105'
                                     : 'bg-[#F6F1E7] hover:bg-[#B85C38] hover:text-white border-[#E7E1D3] text-[#1E1B17]'
                                     }`}
                                 >
-                                  {i + 1} {c.clause_type}
+                                  <span className="truncate">{i + 1}. {c.title}</span>
+                                  <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1 rounded shrink-0 ${i === activeIndex ? 'bg-white/20 text-white' : 'bg-[#E7E1D3] text-[#6E6659]'}`}>
+                                    {c.clause_type}
+                                  </span>
                                 </button>
                               ))}
                             </div>
                           )}
                         </div>
 
-                        {/* Single Active Card View Runway (Non-clipping padding) */}
+                        {/* Single Active Card View Runway */}
                         {activeClause && (
                           <div
                             id="active-clause-card-container"
                             key={activeClause.id}
-                            className="animate-fade-in-up transition-all duration-300 pb-6 mb-4"
+                            className="transition-all duration-200 pb-6 mb-4"
                           >
                             <ClauseCard
                               clause={activeClause}
@@ -540,65 +688,13 @@ function AppContent() {
                               onVerifyInDocument={handleVerifyInDocument}
                               onOpenShareModal={setSelectedShareClause}
                               isActive={true}
+                              conflicts={documentAnalysis.conflicts || documentAnalysis.contradictions || []}
                             />
                           </div>
                         )}
                       </div>
                     );
                   })()}
-                </div>
-
-                {/* Summary Overview Banner */}
-                <div className="bg-[#FBF8F1] border border-[#E7E1D3] rounded-2xl p-5 md:p-6 shadow-xs space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E7E1D3] pb-3">
-                    <div>
-                      <div className="flex items-center space-x-2">
-                        <span className="text-[10px] uppercase font-bold text-[#B85C38] bg-[#B85C38]/10 px-2.5 py-0.5 rounded border border-[#B85C38]/20">
-                          {documentAnalysis.category || 'Legal Document'}
-                        </span>
-                        <span className="text-[11px] text-[#065F46] font-semibold flex items-center space-x-1">
-                          <ShieldCheck className="w-3.5 h-3.5" />
-                          <span>Guard 1 Verified</span>
-                        </span>
-                      </div>
-                      <h2 className="text-xl font-bold font-heading text-[#1E1B17] mt-1">
-                        {documentAnalysis.document_title || 'Legal Agreement'}
-                      </h2>
-                    </div>
-
-                    {/* Overall Risk Score Pill */}
-                    {(() => {
-                      const overallScore = typeof documentAnalysis?.overall_risk_score === 'number' && !isNaN(documentAnalysis.overall_risk_score)
-                        ? documentAnalysis.overall_risk_score
-                        : 0;
-                      const riskText = overallScore > 60 ? 'High Risk' : overallScore > 30 ? 'Moderate Risk' : 'Low Risk';
-                      const riskBadgeColor = overallScore > 60
-                        ? 'bg-[#FFF5F5] text-[#991B1B] border border-[#FCA5A5]'
-                        : overallScore > 30
-                          ? 'bg-[#FFFBEB] text-[#92400E] border border-[#FDE68A]'
-                          : 'bg-[#ECFDF5] text-[#065F46] border border-[#6EE7B7]';
-                      return (
-                        <div className="flex items-center space-x-2 bg-[#F6F1E7] px-3.5 py-1.5 rounded-lg border border-[#E7E1D3]">
-                          <span className="text-xs font-medium text-[#6E6659]">Risk Assessment:</span>
-                          <span
-                            className={`text-xs font-bold px-2.5 py-0.5 rounded flex items-center space-x-1 ${riskBadgeColor}`}
-                          >
-                            <AlertOctagon className="w-3.5 h-3.5 mr-1" />
-                            <span>
-                              {riskText} ({overallScore}/100)
-                            </span>
-                          </span>
-                        </div>
-                      );
-                    })()}
-                  </div>
-
-                  <p className="text-xs md:text-sm text-[#1E1B17] font-medium leading-relaxed">
-                    {(readingLevel === 'very_simple'
-                      ? documentAnalysis.summary_very_simple || documentAnalysis.summary_simple
-                      : documentAnalysis.summary_simple || documentAnalysis.summary_very_simple) ||
-                      `${documentAnalysis.document_title || 'Legal Agreement'} analyzed with ${(documentAnalysis.clauses || []).length} primary clauses extracted.`}
-                  </p>
                 </div>
 
                 {/* Actionable Outputs: Checklist, Possibilities, Lawyer Briefing */}
@@ -650,7 +746,7 @@ function AppContent() {
       </main>
 
       {/* Premium Level Footer (#3C481D) */}
-      <Footer onSelectTab={setActiveTab} />
+      <Footer onSelectTab={handleSelectTab} />
 
       {/* Modals */}
       <SettingsModal

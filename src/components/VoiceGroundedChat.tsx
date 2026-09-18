@@ -17,6 +17,7 @@ import { ApiClient } from '../services/apiClient';
 import { SpeechEngine } from '../utils/speech';
 import { QuotaBar } from './QuotaBar';
 import { FormattedMessageText } from './FormattedMessageText';
+import { AnimatedMicButton, MicState } from './AnimatedMicButton';
 
 import { useLanguage } from '../context/LanguageContext';
 
@@ -44,6 +45,7 @@ export const VoiceGroundedChat: React.FC<VoiceGroundedChatProps> = ({
   ]);
   const [inputText, setInputText] = useState('');
   const [isListening, setIsListening] = useState(false);
+  const [micState, setMicState] = useState<MicState>('muted');
   const [activeSpeechId, setActiveSpeechId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [quotaTelemetry, setQuotaTelemetry] = useState<QuotaTelemetry | undefined>(undefined);
@@ -92,25 +94,62 @@ export const VoiceGroundedChat: React.FC<VoiceGroundedChatProps> = ({
     }
   };
 
+  const [activeListener, setActiveListener] = useState<{ stop: () => void } | null>(null);
+
   const handleToggleVoiceInput = () => {
-    if (isListening) {
-      setIsListening(false);
+    if (isListening || micState === 'listening') {
+      if (activeListener) {
+        activeListener.stop();
+        setActiveListener(null);
+      } else {
+        setIsListening(false);
+        setMicState('muted');
+      }
     } else {
+      setMicState('listening');
       setIsListening(true);
-      SpeechEngine.listen(
-        (transcript) => {
-          setInputText(transcript);
-          setIsListening(false);
-          handleSend(transcript);
+      const listener = SpeechEngine.listen(
+        (draftText) => {
+          // Live preview draft in input field ONLY (never submitted prematurely)
+          setInputText(draftText);
         },
-        () => setIsListening(true),
-        () => setIsListening(false),
+        (finalText) => {
+          // Final accumulated transcript submitted ONCE!
+          setInputText(finalText);
+          setIsListening(false);
+          setMicState('muted');
+          setActiveListener(null);
+          handleSend(finalText);
+        },
+        () => {
+          setIsListening(true);
+          setMicState('listening');
+        },
+        () => {
+          setIsListening(false);
+          setMicState('muted');
+          setActiveListener(null);
+        },
         (err) => {
           setIsListening(false);
+          setActiveListener(null);
           console.warn('Speech recognition error:', err);
+          if (
+            err === 'not-allowed' ||
+            err === 'service-not-allowed' ||
+            (typeof err === 'string' && err.includes('blocked'))
+          ) {
+            setMicState('permission-denied');
+          } else if (err === 'no-speech') {
+            setMicState('no-speech');
+            setTimeout(() => setMicState('muted'), 4000);
+          } else {
+            setMicState('muted');
+          }
         },
         language
       );
+      setActiveListener(listener);
     }
   };
 
@@ -223,17 +262,12 @@ export const VoiceGroundedChat: React.FC<VoiceGroundedChatProps> = ({
 
       {/* Chat Input Bar */}
       <div className="flex items-center space-x-2 pt-2 border-t border-[#E7E1D3]">
-        <button
-          onClick={handleToggleVoiceInput}
-          title="Speak your question"
-          className={`p-2 rounded-lg border transition-colors ${
-            isListening
-              ? 'bg-[#FEE2E2] text-[#991B1B] border-[#FCA5A5] animate-pulse'
-              : 'bg-[#F6F1E7] hover:bg-[#E7E1D3]/50 text-[#B85C38] border-[#E7E1D3]'
-          }`}
-        >
-          {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-        </button>
+        <AnimatedMicButton
+          isListening={isListening}
+          micState={micState}
+          onToggle={handleToggleVoiceInput}
+          language={language}
+        />
 
         <input
           id="voice-grounded-chat-input"
