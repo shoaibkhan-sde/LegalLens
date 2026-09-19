@@ -74,8 +74,8 @@ export const ClauseCard: React.FC<ClauseCardProps> = ({
   const docClauseTitle = isPreamble
     ? 'Preamble'
     : clauseNumberStr && /^\d+$/.test(clauseNumberStr)
-    ? `Clause ${clauseNumberStr}`
-    : `Clause ${index + 1}`;
+      ? `Clause ${clauseNumberStr}`
+      : `Clause ${index + 1}`;
   const dualBadgeText = `${docClauseTitle} (card ${index + 1} of ${totalCards})`;
 
   // Related Cross-Clause Conflicts
@@ -86,36 +86,33 @@ export const ClauseCard: React.FC<ClauseCardProps> = ({
   return (
     <div
       data-testid={`clause-card-${clause.id}`}
-      className={`rounded-[24px] border-2 transition-all duration-300 backdrop-blur-xs overflow-hidden bg-[#FBF8F1] ${
-        isActive
+      className={`rounded-[24px] border-2 transition-all duration-300 backdrop-blur-xs overflow-hidden bg-[#FBF8F1] ${isActive
           ? 'border-[#B85C38] shadow-xl ring-1 ring-[#B85C38]/30'
           : 'border-[#E7E1D3] shadow-md hover:shadow-lg'
-      }`}
+        }`}
       style={
         isActive
           ? {
-              boxShadow: '0 16px 36px -4px rgba(184, 92, 56, 0.22), 0 6px 16px -2px rgba(0, 0, 0, 0.08)',
-            }
+            boxShadow: '0 16px 36px -4px rgba(184, 92, 56, 0.22), 0 6px 16px -2px rgba(0, 0, 0, 0.08)',
+          }
           : {
-              boxShadow: '0 8px 24px -4px rgba(30, 27, 23, 0.08), 0 2px 8px -2px rgba(0, 0, 0, 0.04)',
-            }
+            boxShadow: '0 8px 24px -4px rgba(30, 27, 23, 0.08), 0 2px 8px -2px rgba(0, 0, 0, 0.04)',
+          }
       }
     >
       {/* Pinned Card Header Bar */}
       <div
         onClick={() => onVerifyInDocument?.(clause.id, index)}
-        className={`h-[46px] px-4 flex items-center justify-between gap-3 cursor-pointer select-none transition-colors border-b ${
-          isActive
+        className={`h-[46px] px-4 flex items-center justify-between gap-3 cursor-pointer select-none transition-colors border-b ${isActive
             ? 'bg-[#F6F1E7] border-[#B85C38]/40'
             : 'bg-[#F6F1E7] border-[#E7E1D3] hover:bg-[#E7E1D3]/50'
-        }`}
+          }`}
       >
         <div className="flex items-center space-x-2.5 min-w-0">
           <span
             data-testid="dual-clause-badge"
-            className={`text-[11px] font-extrabold font-mono px-2.5 py-0.5 rounded-full shrink-0 transition-colors ${
-              isActive ? 'bg-[#B85C38] text-white' : 'bg-[#E7E1D3] text-[#1E1B17]'
-            }`}
+            className={`text-[11px] font-extrabold font-mono px-2.5 py-0.5 rounded-full shrink-0 transition-colors ${isActive ? 'bg-[#B85C38] text-white' : 'bg-[#E7E1D3] text-[#1E1B17]'
+              }`}
           >
             {dualBadgeText}
           </span>
@@ -223,11 +220,10 @@ export const ClauseCard: React.FC<ClauseCardProps> = ({
                 e.stopPropagation();
                 handleToggleReadAloud();
               }}
-              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-colors border ${
-                isPlayingAudio
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-colors border ${isPlayingAudio
                   ? 'bg-[#B85C38] text-white border-[#B85C38]'
                   : 'bg-[#F6F1E7] hover:bg-[#E7E1D3]/50 text-[#1E1B17] border-[#E7E1D3]'
-              }`}
+                }`}
             >
               {isPlayingAudio ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5 text-[#B85C38]" />}
               <span>{isPlayingAudio ? (language === 'hi' ? 'रोकें' : 'Stop') : (language === 'hi' ? 'सुनें' : 'Read')}</span>

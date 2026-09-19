@@ -21,7 +21,9 @@ export const ExplainToFriendModal: React.FC<ExplainToFriendModalProps> = ({
 
   if (!isOpen || !clause) return null;
 
-  const shareText = `Hey! Here is a simple explanation of a clause in my agreement (${documentTitle}):\n\nClause: ${clause.title}\nPlain Meaning: ${clause.very_simple_explanation}\nWatch out: ${clause.one_line_consequence}\n\nSummarized with LegalLens GenAI`;
+  const plainMeaning = clause.very_simple_explanation || clause.simple_explanation || 'Meaning temporarily unavailable for this clause.';
+
+  const shareText = `Hey! Here is a simple explanation of a clause in my agreement (${documentTitle}):\n\nClause: ${clause.title}\nPlain Meaning: ${plainMeaning}\nWatch out: ${clause.one_line_consequence}\n\nSummarized with LegalLens GenAI`;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(shareText);
@@ -55,7 +57,7 @@ export const ExplainToFriendModal: React.FC<ExplainToFriendModalProps> = ({
             <Sparkles className="w-3.5 h-3.5" />
             <span>{clause.title}</span>
           </div>
-          <p className="text-[#1E1B17] leading-relaxed">{clause.very_simple_explanation}</p>
+          <p className="text-[#1E1B17] leading-relaxed">{plainMeaning}</p>
           <div className="p-2.5 bg-[#FBF8F1] rounded text-[#1E1B17] font-medium border border-[#E7E1D3]">
             {t('explain_friend.consequence')}: {clause.one_line_consequence}
           </div>

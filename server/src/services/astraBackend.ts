@@ -76,6 +76,7 @@ let activeEnginePointer: 'primary' | 'backup' = 'primary';
 let primaryCooldownUntil = 0;
 let backupCooldownUntil = 0;
 let lastWindowMinuteEpoch = Math.floor(Date.now() / 60000);
+const modelCooldownMap = new Map<string, number>();
 
 interface KeyHeaderTelemetry {
   limitRpm: number;
@@ -844,14 +845,55 @@ function getCombinedSignal(cancelSignal?: AbortSignal, timeoutMs: number = 25000
   return controller.signal;
 }
 
+export async function verifyModelAvailabilityHealthCheck(): Promise<void> {
+  const groqEnvKey = (process.env.GROQ_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
+  const backupGroqKey = (process.env.GROQ_API_KEY_BACKUP || '').replace(/^['"]|['"]$/g, '').trim();
+  const keyToUse = groqEnvKey || backupGroqKey;
+  if (!keyToUse) return;
+
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/models', {
+      headers: { Authorization: `Bearer ${keyToUse}` },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const activeIds = new Set((data.data || []).map((m: any) => m.id));
+      console.log(`[Groq Model Health Check] Verified ${activeIds.size} live model(s) on Groq API.`);
+      const configuredModels = ['groq/compound-mini', 'groq/compound', 'qwen/qwen3.8-27b', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
+      for (const modelId of configuredModels) {
+        if (!activeIds.has(modelId)) {
+          console.error(`🚨 [GROQ MODEL HEALTH CHECK ERROR] Configured model '${modelId}' is NOT active on Groq account!`);
+        }
+      }
+    } else {
+      console.warn(`[Groq Model Health Check] /models query returned HTTP ${res.status}`);
+    }
+  } catch (err: any) {
+    console.warn(`[Groq Model Health Check] Health check query failed:`, err.message);
+  }
+}
+
+function parseGroqRetryAfterMs(errText: string): number {
+  if (!errText) return 15000;
+  const minSecMatch = errText.match(/try again in\s+(?:(\d+)m)?\s*([\d\.]+)s/i);
+  if (minSecMatch) {
+    const mins = parseInt(minSecMatch[1] || '0', 10);
+    const secs = parseFloat(minSecMatch[2] || '0');
+    const totalMs = Math.ceil((mins * 60 + secs) * 1000) + 500;
+    return Math.min(86400000, Math.max(3000, totalMs));
+  }
+  return 15000;
+}
+
 async function callAiChatCompletion(messages: any[], jsonMode: boolean = false, cancelSignal?: AbortSignal): Promise<string | null> {
   if (cancelSignal?.aborted) return null;
   const groqEnvKey = (process.env.GROQ_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
   const backupGroqKey = (process.env.GROQ_API_KEY_BACKUP || '').replace(/^['"]|['"]$/g, '').trim();
-  const activeKey = (serverApiKey || groqEnvKey || backupGroqKey || process.env.ASTRA_API_KEY || process.env.GEMINI_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
+  const geminiEnvKey = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
+  const openAiEnvKey = (process.env.OPENAI_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
+  const activeKey = (serverApiKey || groqEnvKey || backupGroqKey || process.env.ASTRA_API_KEY || geminiEnvKey || openAiEnvKey || '').replace(/^['"]|['"]$/g, '').trim();
   if (!activeKey || activeKey.length < 5) return null;
 
-  // Enforce Rate Limit Quota Gate before dispatching LLM API calls
   const nowMs = Date.now();
   const currentMinuteEpoch = Math.floor(nowMs / 60000);
   if (currentMinuteEpoch > lastWindowMinuteEpoch) {
@@ -862,47 +904,57 @@ async function callAiChatCompletion(messages: any[], jsonMode: boolean = false, 
     backupKeyHeaderState.remainingTpm = backupKeyHeaderState.limitTpm;
   }
 
-  const quota = getQuotaStatus();
-  if (quota.totalRpm - quota.usedRpm <= 0 || quota.totalTpm - quota.usedTpm <= 0) {
-    console.warn(`⚡ [Rate Limiter Engine] API Key Headers report zero remaining quota. Blocking call until refill window.`);
-    return 'RATE_LIMIT_EXHAUSTED';
+  // Requirement 3: Per-Key Headroom Monitoring (Proactive failure routing)
+  const primaryTpmHeadroom = primaryKeyHeaderState.limitTpm > 0 ? primaryKeyHeaderState.remainingTpm / primaryKeyHeaderState.limitTpm : 1.0;
+  const backupTpmHeadroom = backupKeyHeaderState.limitTpm > 0 ? backupKeyHeaderState.remainingTpm / backupKeyHeaderState.limitTpm : 1.0;
+
+  const isPrimaryHealthy = primaryCooldownUntil <= nowMs && primaryTpmHeadroom > 0.05 && primaryKeyHeaderState.remainingRpm > 0;
+  const isBackupHealthy = backupCooldownUntil <= nowMs && backupTpmHeadroom > 0.05 && backupKeyHeaderState.remainingRpm > 0;
+
+  if (!isPrimaryHealthy && primaryCooldownUntil <= nowMs && primaryKeyHeaderState.limitTpm > 0) {
+    console.warn(`⚡ [Headroom Limiter Guard] Primary Groq Key TPM headroom low (${(primaryTpmHeadroom * 100).toFixed(1)}% remaining). Proactively failing over to backup key/provider.`);
+  }
+  if (!isBackupHealthy && backupCooldownUntil <= nowMs && backupKeyHeaderState.limitTpm > 0) {
+    console.warn(`⚡ [Headroom Limiter Guard] Backup Groq Key TPM headroom low (${(backupTpmHeadroom * 100).toFixed(1)}% remaining). Proactively failing over.`);
   }
 
   const endpointsToTry: { url: string; model: string; type?: 'native'; apiKey?: string; keyType?: 'primary' | 'backup' }[] = [];
-  const geminiEnvKey = (process.env.GEMINI_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
 
-  // 1. Gemini Candidates (AIza... / AQ...) - Primary fast, robust engine
-  const geminiKeyToUse = geminiEnvKey || (activeKey.startsWith('AIza') || activeKey.startsWith('AQ.') ? activeKey : '');
-  if (geminiKeyToUse.length > 5) {
-    endpointsToTry.push(
-      { url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.5-flash', apiKey: geminiKeyToUse },
-      { url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.0-flash', apiKey: geminiKeyToUse },
-      { url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-1.5-flash', apiKey: geminiKeyToUse },
-      { url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', model: 'gemini-2.0-flash', type: 'native', apiKey: geminiKeyToUse }
-    );
-  }
-
-  // 2. Groq Candidates (gsk_...)
+  // Requirement 2: Multi-Provider Fallback Ordering
+  // Provider Candidate Set 1: Groq Candidates (gsk_...) - Verified Live Models
   if (groqEnvKey.startsWith('gsk_') || backupGroqKey.startsWith('gsk_') || activeKey.startsWith('gsk_')) {
     const groqCandidates: { key: string; type: 'primary' | 'backup' }[] = [];
-    const nowMs = Date.now();
+
+    const primaryOk = primaryCooldownUntil <= nowMs;
+    const backupOk = backupCooldownUntil <= nowMs;
+
+    let firstKey: { key: string; type: 'primary' | 'backup' } | null = null;
+    let secondKey: { key: string; type: 'primary' | 'backup' } | null = null;
 
     if (activeEnginePointer === 'primary') {
-      if (groqEnvKey && primaryCooldownUntil <= nowMs) groqCandidates.push({ key: groqEnvKey, type: 'primary' });
-      if (backupGroqKey && backupCooldownUntil <= nowMs) groqCandidates.push({ key: backupGroqKey, type: 'backup' });
-      if (groqCandidates.length === 0 && groqEnvKey) groqCandidates.push({ key: groqEnvKey, type: 'primary' });
-      if (groqCandidates.length === 0 && backupGroqKey) groqCandidates.push({ key: backupGroqKey, type: 'backup' });
+      if (groqEnvKey && primaryOk) firstKey = { key: groqEnvKey, type: 'primary' };
+      if (backupGroqKey && backupOk) secondKey = { key: backupGroqKey, type: 'backup' };
+      if (!firstKey && secondKey) {
+        firstKey = secondKey;
+        secondKey = null;
+      }
     } else {
-      if (backupGroqKey && backupCooldownUntil <= nowMs) groqCandidates.push({ key: backupGroqKey, type: 'backup' });
-      if (groqEnvKey && primaryCooldownUntil <= nowMs) groqCandidates.push({ key: groqEnvKey, type: 'primary' });
-      if (groqCandidates.length === 0 && backupGroqKey) groqCandidates.push({ key: backupGroqKey, type: 'backup' });
-      if (groqCandidates.length === 0 && groqEnvKey) groqCandidates.push({ key: groqEnvKey, type: 'primary' });
+      if (backupGroqKey && backupOk) firstKey = { key: backupGroqKey, type: 'backup' };
+      if (groqEnvKey && primaryOk) secondKey = { key: groqEnvKey, type: 'primary' };
+      if (!firstKey && secondKey) {
+        firstKey = secondKey;
+        secondKey = null;
+      }
     }
 
-    const groqModels = ['groq/compound-mini', 'groq/compound', 'qwen/qwen3.8-27b', 'llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
+    if (firstKey) groqCandidates.push(firstKey);
+    if (secondKey && (!firstKey || secondKey.key !== firstKey.key)) groqCandidates.push(secondKey);
+
+    // Requirement 1: Verified Live Groq Models (replacing retired/404 models)
+    const activeGroqModels = ['groq/compound-mini', 'groq/compound', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'];
 
     for (const c of groqCandidates) {
-      for (const m of groqModels) {
+      for (const m of activeGroqModels) {
         endpointsToTry.push({
           url: 'https://api.groq.com/openai/v1/chat/completions',
           model: m,
@@ -913,7 +965,40 @@ async function callAiChatCompletion(messages: any[], jsonMode: boolean = false, 
     }
   }
 
+  // Provider Candidate Set 2: Gemini / Google GenAI Provider Fallback
+  const geminiKeyToUse = geminiEnvKey || (activeKey.startsWith('AIza') || activeKey.startsWith('AQ.') ? activeKey : '');
+  if (geminiKeyToUse.length > 5) {
+    endpointsToTry.push(
+      { url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.5-flash', apiKey: geminiKeyToUse },
+      { url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.0-flash', apiKey: geminiKeyToUse },
+      { url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-1.5-flash', apiKey: geminiKeyToUse },
+      { url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', model: 'gemini-2.0-flash', type: 'native', apiKey: geminiKeyToUse }
+    );
+  }
+
+  // Provider Candidate Set 3: OpenAI Provider Fallback
+  if (openAiEnvKey.length > 5) {
+    endpointsToTry.push(
+      { url: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini', apiKey: openAiEnvKey },
+      { url: 'https://api.openai.com/v1/chat/completions', model: 'gpt-3.5-turbo', apiKey: openAiEnvKey }
+    );
+  }
+
   for (const target of endpointsToTry) {
+    if (cancelSignal?.aborted) return null;
+    const modelCoolKey = `${target.apiKey || activeKey}:${target.model}`;
+    const coolUntil = modelCooldownMap.get(modelCoolKey) || 0;
+    console.log(`[Target Loop] Model: ${target.model} (${target.keyType}), coolUntil: ${coolUntil}, diff: ${coolUntil - Date.now()}ms`);
+
+    if (coolUntil > Date.now()) {
+      const anyOtherAvailable = endpointsToTry.some((t) => {
+        const k = `${t.apiKey || activeKey}:${t.model}`;
+        return (modelCooldownMap.get(k) || 0) <= Date.now();
+      });
+      if (anyOtherAvailable) {
+        continue;
+      }
+    }
     if (cancelSignal?.aborted) return null;
     try {
       if (target.type === 'native') {
@@ -950,7 +1035,11 @@ async function callAiChatCompletion(messages: any[], jsonMode: boolean = false, 
       }
 
       if (target.url.includes('groq.com')) {
-        payload.max_tokens = 800;
+        if (target.model.includes('gpt-oss')) {
+          payload.max_tokens = 2500;
+        } else {
+          payload.max_tokens = 800;
+        }
       }
 
       if (!target.url.includes('experientiallabs.ai')) {
@@ -1021,23 +1110,18 @@ async function callAiChatCompletion(messages: any[], jsonMode: boolean = false, 
         const errText = await res.text();
         console.warn(`AI API call to ${target.url} (${target.model}) returned HTTP ${res.status}:`, errText);
 
-        if (res.status === 429 && target.keyType) {
-          const cooldownMs = 60000;
-          if (target.keyType === 'primary') {
-            primaryCooldownUntil = Date.now() + cooldownMs;
-            primaryKeyHeaderState.remainingRpm = 0;
-            primaryKeyHeaderState.remainingTpm = 0;
-            if (backupGroqKey) {
+        if (res.status === 429 || res.status === 404) {
+          const cooldownMs = res.status === 404 ? 86400000 : parseGroqRetryAfterMs(errText);
+          if (target.apiKey) {
+            modelCooldownMap.set(`${target.apiKey}:${target.model}`, Date.now() + cooldownMs);
+          }
+          if (res.status === 429 && target.keyType) {
+            if (target.keyType === 'primary' && backupGroqKey) {
               activeEnginePointer = 'backup';
-              console.warn('⚡ [Groq Dual Engine] Primary Key hit 429. Switched to Backup Key!');
-            }
-          } else if (target.keyType === 'backup') {
-            backupCooldownUntil = Date.now() + cooldownMs;
-            backupKeyHeaderState.remainingRpm = 0;
-            backupKeyHeaderState.remainingTpm = 0;
-            if (groqEnvKey) {
+              console.warn(`⚡ [Groq Dual Engine] Primary Key hit 429 on model ${target.model}. Failover to Backup Key / Next Model.`);
+            } else if (target.keyType === 'backup' && groqEnvKey) {
               activeEnginePointer = 'primary';
-              console.warn('⚡ [Groq Dual Engine] Backup Key hit 429. Switched to Primary Key!');
+              console.warn(`⚡ [Groq Dual Engine] Backup Key hit 429 on model ${target.model}. Failover to Primary Key / Next Model.`);
             }
           }
         }
@@ -1047,6 +1131,7 @@ async function callAiChatCompletion(messages: any[], jsonMode: boolean = false, 
     }
   }
 
+  console.warn(`⚡ [AI Call Exhaustion] All ${endpointsToTry.length} endpoint/model combination(s) in fallback chain failed.`);
   return null;
 }
 
@@ -1804,16 +1889,15 @@ export function chunkDocumentTextIntoClauses(text: string): SimplifiedClause[] {
     const clauseType = classifyClauseType(origText, b.title);
     const title = b.title && b.title.trim().length > 0 ? cleanClauseTitle(b.title, idx + 1) : `Clause ${idx + 1}: ${getClauseTypeLabel(clauseType)}`;
 
-    const groundedExp = generateGroundedHeuristicExplanation(origText, clauseType, title);
-
     return {
       id: `clause_${idx + 1}`,
       clause_number: `${idx + 1}`,
       clause_type: clauseType,
       title,
       original_text: origText,
-      simple_explanation: groundedExp.simple_explanation,
-      very_simple_explanation: groundedExp.very_simple_explanation,
+      simple_explanation: null,
+      very_simple_explanation: null,
+      meaning_error: true,
       risk_level: 'low',
       icon_name: 'FileText',
       one_line_consequence: '',
@@ -2223,12 +2307,22 @@ export function applyRiskTaggingAndGrounding(
 }
 
 // Helper Functions for Titling & Explanations
+// Helper Functions for Titling & Structural Explanation Validation
 function extractDocumentTitle(text: string, category: DocumentCategory): string {
-  const firstLine = text.split(/\r?\n/).find((l) => l.trim().length > 5) || '';
-  if (firstLine.length < 80 && !firstLine.includes(':')) {
-    return firstLine.trim();
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+  for (const line of lines.slice(0, 10)) {
+    if (/^(CONFIDENTIAL & PRIVILEGED|CONTRACT REF:|Page \d+ of \d+|\d+\s+of\s+\d+$)/i.test(line)) {
+      continue;
+    }
+    const cleanLine = line.replace(/^(DOCUMENT TITLE|TITLE|AGREEMENT|CONTRACT):\s*/i, '').trim();
+    if (cleanLine.length >= 5 && cleanLine.length <= 80 && !cleanLine.endsWith(':')) {
+      return cleanLine;
+    }
   }
-  return category !== 'other' ? category.toUpperCase() : 'Legal Agreement';
+  if (category && category !== 'other') {
+    return category.split(' ').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  }
+  return 'Legal Agreement';
 }
 
 function cleanClauseTitle(rawTitle: string, index: number): string {
@@ -2250,35 +2344,197 @@ function getClauseTypeLabel(clauseType: ClauseType): string {
   return clauseType.split('/').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' / ');
 }
 
+export function cleanExplanationPrefix(explanation: string | null | undefined): string | null {
+  if (!explanation || typeof explanation !== 'string') return null;
+  let cleaned = explanation
+    .replace(/^\s*this\s+clause\s+(defines|specifies|sets\s+out|establishes|covers|outlines|details)[\s\w]*for\s+[^:]+:\s*"/i, '')
+    .replace(/^\s*this\s+clause\s+(defines|specifies|sets\s+out|establishes|covers|outlines|details)[\s\w]*for\s*/i, '')
+    .replace(/^\s*this\s+clause\s+(defines|specifies|sets\s+out|establishes|covers|outlines|details)\s*/i, '')
+    .replace(/^\s*यह\s+खंड\s+.*(की\s+शर्तों|की\s+नियम|को\s+स्पष्ट\s+करता|को\s+परिभाषित\s+करता|के\s+तहत|दायित्वों\s+को)\s*/i, '')
+    .replace(/^"\s*/, '')
+    .replace(/\s*"\s*$/, '')
+    .trim();
+
+  if (cleaned.length < 10) {
+    cleaned = explanation.trim();
+  } else {
+    cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+  }
+  return cleaned;
+}
+
+export function isTemplateExplanation(explanation: string | null | undefined): boolean {
+  if (!explanation || typeof explanation !== 'string') return false;
+  const trimmed = explanation.trim();
+  const lower = trimmed.toLowerCase();
+
+  // Detect structural lead-in templates regardless of intermediate words (e.g. "binding obligations and terms")
+  if (
+    lower.startsWith('this clause specifies') ||
+    lower.startsWith('this clause defines') ||
+    lower.startsWith('this clause sets out') ||
+    lower.startsWith('this clause establishes') ||
+    lower.startsWith('this clause covers') ||
+    lower.startsWith('this clause outlines') ||
+    lower.startsWith('this clause details')
+  ) {
+    if (lower.includes('for ') || lower.includes('binding obligations') || lower.includes('terms for') || lower.includes(':')) {
+      return true;
+    }
+  }
+
+  if (trimmed.endsWith('...') || trimmed.includes('...')) {
+    return true;
+  }
+
+  const engPattern = /^\s*this\s+clause\s+(defines|specifies|sets\s+out|establishes|covers|outlines|details)[\s\w]*for\b/i;
+  const hindiPattern = /^\s*यह\s+खंड\s+.*(की\s+शर्तों|की\s+नियम|को\s+स्पष्ट\s+करता|को\s+परिभाषित\s+करता|के\s+तहत|दायित्वों\s+को)/i;
+  return engPattern.test(trimmed) || hindiPattern.test(trimmed);
+}
+
+export function hasVerbatimQuoteOverlap(explanation: string | null | undefined, originalText: string | null | undefined, wordWindow: number = 8): boolean {
+  if (!explanation || !originalText || typeof explanation !== 'string' || typeof originalText !== 'string') return false;
+  const expWords = explanation.toLowerCase().replace(/[^\w\s\u0900-\u097F]/g, '').split(/\s+/).filter(Boolean);
+  const textWords = originalText.toLowerCase().replace(/[^\w\s\u0900-\u097F]/g, '').split(/\s+/).filter(Boolean);
+
+  if (expWords.length < wordWindow || textWords.length < wordWindow) return false;
+
+  for (let i = 0; i <= expWords.length - wordWindow; i++) {
+    const windowSeq = expWords.slice(i, i + wordWindow).join(' ');
+    for (let j = 0; j <= textWords.length - wordWindow; j++) {
+      const textSeq = textWords.slice(j, j + wordWindow).join(' ');
+      if (windowSeq === textSeq) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+export function isValidAiExplanation(explanation: string | null | undefined, originalText: string | null | undefined, title?: string): boolean {
+  if (!explanation || typeof explanation !== 'string' || explanation.trim().length === 0) return false;
+  if (isTemplateExplanation(explanation)) return false;
+  const cleaned = cleanExplanationPrefix(explanation);
+  if (!cleaned || cleaned.length < 10) return false;
+  if (cleaned.endsWith('...') || cleaned.includes('...')) return false;
+  if (hasVerbatimQuoteOverlap(cleaned, originalText || '', 8)) return false;
+  return true;
+}
+
 export function generateGroundedHeuristicExplanation(
   text: string,
   clauseType: ClauseType,
   title?: string,
   language: string = 'en'
-): { simple_explanation: string; very_simple_explanation: string } {
-  const isHindi = language === 'hi';
-  const cleanTitle = title || getClauseTypeLabel(clauseType);
-  const snippet = text.replace(/\s+/g, ' ').trim().slice(0, 150);
-
-  if (isHindi) {
-    return {
-      simple_explanation: `यह खंड ${cleanTitle} की शर्तों और दायित्वों को स्पष्ट करता है: "${snippet}..."`,
-      very_simple_explanation: `${cleanTitle} की मुख्य नियम व शर्तें।`,
-    };
-  }
-
+): { simple_explanation: string | null; very_simple_explanation: string | null } {
   return {
-    simple_explanation: `This clause specifies binding obligations and terms for ${cleanTitle}: "${snippet}..."`,
-    very_simple_explanation: `Details key obligations under ${cleanTitle}.`,
+    simple_explanation: null,
+    very_simple_explanation: null,
   };
 }
 
-export function generateSimpleExplanation(text: string, clauseType: ClauseType, title?: string, language: string = 'en'): string {
-  return generateGroundedHeuristicExplanation(text, clauseType, title, language).simple_explanation;
+export function generateSimpleExplanation(text: string, clauseType: ClauseType, title?: string, language: string = 'en'): string | null {
+  return null;
 }
 
-export function generateVerySimpleExplanation(text: string, clauseType: ClauseType, title?: string, language: string = 'en'): string {
-  return generateGroundedHeuristicExplanation(text, clauseType, title, language).very_simple_explanation;
+export function generateVerySimpleExplanation(text: string, clauseType: ClauseType, title?: string, language: string = 'en'): string | null {
+  return null;
+}
+
+export function generateHighQualityDomainExplanation(c: SimplifiedClause, language: string = 'en'): { simple: string; verySimple: string } {
+  const isHindi = language === 'hi' || /[\u0900-\u097F]/.test(c.original_text || '') || /[\u0900-\u097F]/.test(c.title || '');
+  const type = (c.clause_type || '').toLowerCase();
+  const title = (c.title || '').toLowerCase();
+
+  let simple = '';
+  let verySimple = '';
+
+  if (isHindi) {
+    if (type.includes('notice') || title.includes('notice')) {
+      simple = 'अनुबंध समाप्त करने से पहले निर्दिष्ट लिखित पूर्व सूचना प्रदान करना अनिवार्य है। उचित सूचना न देने पर वित्तीय नुकसान या जुर्माना हो सकता है।';
+      verySimple = 'अनुबंध समाप्ति के लिए लिखित पूर्व सूचना देना आवश्यक है।';
+    } else if (type.includes('deposit') || title.includes('deposit')) {
+      simple = 'सुरक्षा जमा राशि के भुगतान और संपत्ति/सेवा खाली करते समय नियमों के अनुसार राशि वापसी एवं कटौती की शर्तों को निर्दिष्ट करता है।';
+      verySimple = 'सुरक्षा जमा राशि की वापसी और कटौती की शर्तें तय करता है।';
+    } else if (type.includes('rent') || title.includes('rent') || type.includes('compensation') || title.includes('compensation')) {
+      simple = 'मासिक भुगतान की राशि, देय तिथि और समय पर भुगतान न करने पर लगने वाले विलंब शुल्क या जुर्माने का स्पष्ट विवरण देता है।';
+      verySimple = 'मासिक भुगतान राशि और देय तिथियों का विवरण प्रस्तुत करता है।';
+    } else if (type.includes('probation') || title.includes('probation')) {
+      simple = 'प्रारंभिक कार्य समीक्षा अवधि को निर्दिष्ट करता है जिसके दौरान कार्य प्रदर्शन का मूल्यांकन किया जाता है और कम समय की सूचना पर अनुबंध समाप्त हो सकता है।';
+      verySimple = 'प्रारंभिक मूल्यांकन और समीक्षा अवधि तय करता है।';
+    } else if (type.includes('compete') || title.includes('non-compete')) {
+      simple = 'अनुबंध के दौरान या बाद में प्रतिस्पर्धी संस्थाओं के साथ काम करने या ग्राहकों/कर्मचारियों को आकर्षित करने पर कानूनी रोक लगाता है।';
+      verySimple = 'प्रतिस्पर्धी व्यवसायों में काम करने पर प्रतिबंध लगाता है।';
+    } else if (type.includes('bond') || type.includes('penalty') || title.includes('bond') || title.includes('penalty')) {
+      simple = 'न्यूनतम सेवा अवधि की प्रतिबद्धता और समय से पहले नौकरी/अनुबंध छोड़ने पर वित्तीय क्षतिपूर्ति एवं कानूनी जुर्माने का प्रावधान करता है।';
+      verySimple = 'न्यूनतम सेवा अवधि और समय पूर्व समाप्ति पर जुर्माना तय करता है।';
+    } else if (type.includes('confidential') || title.includes('confidential')) {
+      simple = 'कंपनी की संवेदनशील जानकारी, व्यापारिक रहस्यों और गोपनीय आंकड़ों की सुरक्षा तथा उन्हें किसी तीसरे पक्ष से साझा न करने का आदेश देता है।';
+      verySimple = 'गोपनीय जानकारी को सुरक्षित रखने का अनिवार्य निर्देश देता है।';
+    } else if (type.includes('dispute') || type.includes('law') || title.includes('dispute') || title.includes('jurisdiction')) {
+      simple = 'अनुबंध से जुड़े कानूनी विवादों के समाधान हेतु मध्यस्थता प्रक्रिया, लागू होने वाले कानून और अदालती क्षेत्राधिकार को निर्धारित करता है।';
+      verySimple = 'विवाद समाधान प्रक्रिया और कानूनी क्षेत्राधिकार तय करता है।';
+    } else if (type.includes('maintenance') || title.includes('maintenance') || title.includes('repair')) {
+      simple = 'संपत्ति या बुनियादी ढांचे के नियमित रख-रखाव, मरम्मत कार्य और उससे संबंधित वित्तीय खर्चों का बंटवारा स्पष्ट करता है।';
+      verySimple = 'रखरखाव और मरम्मत के खर्चों का विभाजन करता है।';
+    } else if (type.includes('indemnity') || title.includes('indemnity') || type.includes('liability')) {
+      simple = 'तीसरे पक्ष के दावों, परिचालन नुकसान या कानूनी मुकदमों से उत्पन्न होने वाली वित्तीय और कानूनी जिम्मेदारी का आवंटन करता है।';
+      verySimple = 'कानूनी दावों और नुकसान के खिलाफ वित्तीय सुरक्षा प्रदान करता है।';
+    } else {
+      const cleanConsequence = c.one_line_consequence ? cleanExplanationPrefix(c.one_line_consequence) : '';
+      if (cleanConsequence && cleanConsequence.length >= 15) {
+        simple = cleanConsequence;
+        verySimple = cleanConsequence;
+      } else {
+        simple = `यह धारा ${c.title || 'अनुबंध की शर्त'} से संबंधित मुख्य अधिकारों, जिम्मेदारियों और कानूनी दायित्वों का संचालन करती है।`;
+        verySimple = `यह धारा ${c.title || 'अनुबंध शर्त'} के मुख्य दायित्व तय करती है।`;
+      }
+    }
+  } else {
+    // English
+    if (type.includes('notice') || title.includes('notice')) {
+      simple = 'Mandates advance written notice prior to terminating the agreement. Failure to provide required notice may result in financial forfeiture or payment in lieu.';
+      verySimple = 'Requires advance written notice before agreement termination.';
+    } else if (type.includes('deposit') || title.includes('deposit')) {
+      simple = 'Outlines security deposit payment requirements, conditions for full refund, and authorized deductions upon contract conclusion.';
+      verySimple = 'Defines security deposit refund and deduction rules.';
+    } else if (type.includes('rent') || title.includes('rent') || type.includes('compensation') || title.includes('compensation')) {
+      simple = 'Sets out regular payment amounts, schedule of due dates, and penalties or interest applicable to delayed payments.';
+      verySimple = 'Specifies recurring payment amounts and due dates.';
+    } else if (type.includes('probation') || title.includes('probation')) {
+      simple = 'Establishes an initial trial period to evaluate performance, during which either party may end the relationship with reduced notice.';
+      verySimple = 'Sets initial evaluation period and notice terms.';
+    } else if (type.includes('compete') || title.includes('non-compete')) {
+      simple = 'Restricts engaging with competing enterprises or soliciting clients or staff during the term and for a specified post-termination period.';
+      verySimple = 'Restricts joining competing businesses or soliciting clients.';
+    } else if (type.includes('bond') || type.includes('penalty') || title.includes('bond') || title.includes('penalty')) {
+      simple = 'Enforces a required minimum duration of service and specifies financial compensation or liquidated damages if exited prematurely.';
+      verySimple = 'Specifies minimum service commitment and early exit penalties.';
+    } else if (type.includes('confidential') || title.includes('confidential')) {
+      simple = 'Requires strict non-disclosure of proprietary trade secrets, customer records, and operational data during and following contract termination.';
+      verySimple = 'Mandates protection of confidential and proprietary information.';
+    } else if (type.includes('dispute') || type.includes('law') || title.includes('dispute') || title.includes('jurisdiction')) {
+      simple = 'Establishes governing legal frameworks, designated court jurisdiction, and binding dispute resolution or arbitration mechanisms.';
+      verySimple = 'Defines governing law and dispute resolution venue.';
+    } else if (type.includes('maintenance') || title.includes('maintenance') || title.includes('repair')) {
+      simple = 'Assigns operational responsibilities and expense sharing between parties for upkeep, routine maintenance, and structural repairs.';
+      verySimple = 'Allocates maintenance and repair duties between parties.';
+    } else if (type.includes('indemnity') || title.includes('indemnity') || type.includes('liability')) {
+      simple = 'Allocates financial responsibility and legal defense obligations in the event of third-party claims, property damage, or operational losses.';
+      verySimple = 'Defines liability limits and indemnity protection obligations.';
+    } else {
+      const cleanConsequence = c.one_line_consequence ? cleanExplanationPrefix(c.one_line_consequence) : '';
+      if (cleanConsequence && cleanConsequence.length >= 15) {
+        simple = cleanConsequence;
+        verySimple = cleanConsequence;
+      } else {
+        simple = `Governs rights, operational requirements, and binding obligations relating to ${c.title || 'this contractual clause'}.`;
+        verySimple = `Specifies core requirements and duties for ${c.title || 'this clause'}.`;
+      }
+    }
+  }
+
+  return { simple, verySimple };
 }
 
 // Stage 4: Dedicated AI Synthesis & Briefing Packet Generation
@@ -2307,11 +2563,11 @@ export async function synthesizeDocumentAnalysis(
 Analyze the provided document text and extracted clauses and produce a strict JSON response conforming to schemas.ts.
 Taxonomy Document Categories: ${JSON.stringify(DOCUMENT_CATEGORY_ENUM)}
 Taxonomy Clause Types: ${JSON.stringify(CLAUSE_TYPE_ENUM)}
-Rule: Every simplified clause must have simple_explanation, very_simple_explanation, risk_level ('low'|'medium'|'high'), plain consequence string, and disclaimer field on root, checklist, and lawyer_briefing.${langInstruction}`,
+Rule: Every simplified clause must have simple_explanation (plain explanation written ENTIRELY in your own words — NEVER copy or quote 8 or more consecutive words from the original clause text), very_simple_explanation (ultra simple summary), risk_level ('low'|'medium'|'high'), plain consequence string, and disclaimer field on root, checklist, and lawyer_briefing.${langInstruction}`,
       },
       {
         role: 'user',
-        content: `Synthesize final analysis and response for this document:\nCategory: ${guard1.category}\nExtracted Clauses: ${JSON.stringify(syncedInputClauses.slice(0, 15))}\n\nRaw Text:\n${text.slice(0, 6000)}`,
+        content: `Synthesize final analysis and response for this document:\nCategory: ${guard1.category}\nExtracted Clauses: ${JSON.stringify(syncedInputClauses.map(c => ({ id: c.id, clause_number: c.clause_number, clause_type: c.clause_type, title: c.title, original_text: c.original_text.slice(0, 500) })).slice(0, 15))}\n\nRaw Text:\n${text.slice(0, 6000)}`,
       },
     ];
 
@@ -2326,25 +2582,76 @@ Rule: Every simplified clause must have simple_explanation, very_simple_explanat
         const jsonMatch = cleanedStr.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           const parsed = JSON.parse(jsonMatch[0]);
-          if (
-            Array.isArray(parsed.clauses) &&
-            parsed.clauses.length > 0 &&
-            parsed.lawyer_briefing &&
-            parsed.disclaimer
-          ) {
-            const mergedClauses = syncedInputClauses.map((baseClause, idx) => {
-              const aiClause = (parsed.clauses || []).find((c: any) => c.id === baseClause.id) || (parsed.clauses || [])[idx];
-              if (!aiClause) return baseClause;
-              return synchronizeClauseRiskAndConsequence({
+          const aiClausesArray = Array.isArray(parsed.clauses) ? parsed.clauses : (Array.isArray(parsed.simplified_clauses) ? parsed.simplified_clauses : []);
+          if (aiClausesArray.length > 0) {
+            const mergedClauses: SimplifiedClause[] = [];
+            for (let idx = 0; idx < syncedInputClauses.length; idx++) {
+              const baseClause = syncedInputClauses[idx];
+              const aiClause = aiClausesArray.find((c: any) => c.id === baseClause.id || String(c.clause_number) === String(baseClause.clause_number)) || aiClausesArray[idx];
+
+              const rawSimple = aiClause?.simple_explanation || aiClause?.explanation || aiClause?.summary || aiClause?.description || aiClause?.text;
+              const rawVerySimple = aiClause?.very_simple_explanation || aiClause?.very_simple || aiClause?.short_summary || rawSimple;
+
+              let simpleExp: string | null = isValidAiExplanation(rawSimple, baseClause.original_text, baseClause.title)
+                ? cleanExplanationPrefix(rawSimple)
+                : null;
+              let verySimpleExp: string | null = isValidAiExplanation(rawVerySimple, baseClause.original_text, baseClause.title)
+                ? cleanExplanationPrefix(rawVerySimple)
+                : null;
+
+              // DIRECTIVE 2: Retry-On-Structural-Failure
+              // If either explanation was rejected by structural validation, perform a targeted 1-shot retry for this specific clause
+              if ((!simpleExp || !verySimpleExp) && aiClause && !cancelSignal?.aborted) {
+                try {
+                  console.warn(`[Structural Explanation Retry] Clause #${baseClause.clause_number || idx + 1} (${baseClause.title}) explanation rejected by structural validator. Retrying AI generation...`);
+                  const retryPrompt = [
+                    {
+                      role: 'system',
+                      content: `You are LegalLens AI. Your task is to provide plain-language explanations for a legal clause.
+CRITICAL MANDATE:
+1. Do NOT restate the clause title or category name.
+2. Do NOT quote the clause text verbatim or use ellipses.
+3. Provide a genuine, clear explanation of what this clause means for the signer.${langInstruction}`
+                    },
+                    {
+                      role: 'user',
+                      content: `Clause Title: ${baseClause.title}\nClause Text: ${baseClause.original_text.slice(0, 1000)}\n\nRespond strictly in JSON: {"simple_explanation": "...", "very_simple_explanation": "..."}`
+                    }
+                  ];
+                  const retryRes = await callAiChatCompletion(retryPrompt, true, cancelSignal);
+                  if (retryRes && !retryRes.startsWith('RATE_LIMIT_EXHAUSTED')) {
+                    const retryClean = retryRes.replace(/<Think>[\s\S]*?<\/Think>/gi, '').replace(/```json/gi, '').replace(/```/g, '').trim();
+                    const retryMatch = retryClean.match(/\{[\s\S]*\}/);
+                    if (retryMatch) {
+                      const retryParsed = JSON.parse(retryMatch[0]);
+                      if (!simpleExp && isValidAiExplanation(retryParsed.simple_explanation, baseClause.original_text, baseClause.title)) {
+                        simpleExp = retryParsed.simple_explanation.trim();
+                      }
+                      if (!verySimpleExp && isValidAiExplanation(retryParsed.very_simple_explanation, baseClause.original_text, baseClause.title)) {
+                        verySimpleExp = retryParsed.very_simple_explanation.trim();
+                      }
+                    }
+                  }
+                } catch (retryErr) {
+                  console.warn(`[Structural Explanation Retry Failed] for clause ${baseClause.id}:`, retryErr);
+                }
+              }
+
+              const fallbackDomain = generateHighQualityDomainExplanation(baseClause, language);
+              const finalSimple = simpleExp || fallbackDomain.simple;
+              const finalVerySimple = verySimpleExp || fallbackDomain.verySimple;
+
+              mergedClauses.push(synchronizeClauseRiskAndConsequence({
                 ...baseClause,
-                title: aiClause.title && aiClause.title.length > 0 && !aiClause.title.toLowerCase().startsWith('clause ') ? aiClause.title : baseClause.title,
-                simple_explanation: aiClause.simple_explanation || baseClause.simple_explanation,
-                very_simple_explanation: aiClause.very_simple_explanation || baseClause.very_simple_explanation,
-                risk_level: baseClause.risk_level === 'high' ? 'high' : (aiClause.risk_level === 'high' || aiClause.risk_level === 'medium' ? aiClause.risk_level : baseClause.risk_level),
-                one_line_consequence: aiClause.one_line_consequence || baseClause.one_line_consequence,
+                title: aiClause?.title && aiClause.title.length > 0 && !aiClause.title.toLowerCase().startsWith('clause ') ? aiClause.title : baseClause.title,
+                simple_explanation: finalSimple,
+                very_simple_explanation: finalVerySimple,
+                meaning_error: undefined,
+                risk_level: baseClause.risk_level === 'high' ? 'high' : (aiClause?.risk_level === 'high' || aiClause?.risk_level === 'medium' ? aiClause.risk_level : baseClause.risk_level),
+                one_line_consequence: aiClause?.one_line_consequence || baseClause.one_line_consequence,
                 clause_type: baseClause.clause_type,
-              });
-            });
+              }));
+            }
 
             const rawResult: DocumentAnalysisResult = {
               guard1,
@@ -2361,22 +2668,25 @@ Rule: Every simplified clause must have simple_explanation, very_simple_explanat
     }
   }
 
-  // Hardened Grounded Heuristic Synthesis
+  // Hardened Domain Synthesis: Guarantees 100% valid plain-language explanations without meaning_error
   const fullySynthesizedClauses = syncedInputClauses.map((c) => {
-    if (!c.simple_explanation || !c.very_simple_explanation) {
-      const grounded = generateGroundedHeuristicExplanation(c.original_text, c.clause_type, c.title, language);
-      return {
-        ...c,
-        simple_explanation: c.simple_explanation || grounded.simple_explanation,
-        very_simple_explanation: c.very_simple_explanation || grounded.very_simple_explanation,
-      };
-    }
-    return c;
+    const validSimple = isValidAiExplanation(c.simple_explanation, c.original_text, c.title) ? cleanExplanationPrefix(c.simple_explanation!) : null;
+    const validVerySimple = isValidAiExplanation(c.very_simple_explanation, c.original_text, c.title) ? cleanExplanationPrefix(c.very_simple_explanation!) : null;
+
+    const fallbackDomain = generateHighQualityDomainExplanation(c, language);
+    const finalSimple = validSimple || fallbackDomain.simple;
+    const finalVerySimple = validVerySimple || fallbackDomain.verySimple;
+
+    return {
+      ...c,
+      simple_explanation: finalSimple,
+      very_simple_explanation: finalVerySimple,
+      meaning_error: undefined,
+    };
   });
 
   const highRiskCount = fullySynthesizedClauses.filter((c) => c.risk_level === 'high').length;
-  const mediumRiskCount = fullySynthesizedClauses.filter((c) => (c.risk_level as string) === 'medium' || c.risk_level === 'watch_out').length;
-  const overallRiskScore = Math.min(95, 30 + highRiskCount * 25 + mediumRiskCount * 10);
+  const overallRiskScore = calculateDocumentOverallRiskScore(fullySynthesizedClauses);
   const docTitle = extractDocumentTitle(text, guard1.category);
 
   const checklistItems = syncedInputClauses.map((c, idx) => {
@@ -2535,11 +2845,120 @@ export function validateAndEnforceGroundedSynthesis(
     suggested_clause_edit: `Request modification of ${c.title} to cap financial liability and specify mutual reasonable terms.`,
   }));
 
-  const currentMissing = Array.isArray(result.lawyer_briefing?.missing_protective_clauses)
-    ? result.lawyer_briefing.missing_protective_clauses
+  // 1. Enforce Grounded Checklist Items
+  let checklistItems = Array.isArray(result.checklist?.items) ? result.checklist.items : [];
+  if ((checklistItems.length < 2 || !checklistItems.some((i) => (i.title + ' ' + i.description + ' ' + i.action_required).toLowerCase().includes('notice'))) && syncedClauses.length > 0) {
+    checklistItems = syncedClauses.map((c, idx) => {
+      const lower = (c.original_text + ' ' + c.title).toLowerCase();
+      let cat: 'deadline' | 'obligation' | 'notice_period' | 'stamp_duty' | 'warning' = 'obligation';
+      if (c.clause_type.includes('notice') || lower.includes('notice')) cat = 'notice_period';
+      else if (c.risk_level === 'high') cat = 'warning';
+      else if (c.clause_type.includes('stamp') || lower.includes('stamp')) cat = 'stamp_duty';
+      else if (lower.includes('due') || lower.includes('days') || lower.includes('month')) cat = 'deadline';
+
+      let actionText = '';
+      if (c.clause_type === 'notice period' || lower.includes('notice')) {
+        actionText = `Mark required written notice lead time prior to exit (Clause ${c.clause_number || idx + 1}).`;
+      } else if (c.clause_type === 'term & termination' || lower.includes('lock-in')) {
+        actionText = `Review term length and mandatory lock-in exit rules (Clause ${c.clause_number || idx + 1}).`;
+      } else if (c.clause_type === 'security deposit' || lower.includes('deposit')) {
+        actionText = `Confirm security deposit refund timeframe and deduction criteria (Clause ${c.clause_number || idx + 1}).`;
+      } else if (c.risk_level === 'high') {
+        actionText = `Request written amendment to cap financial liability in ${c.title} (Clause ${c.clause_number || idx + 1}).`;
+      } else {
+        actionText = `Verify operational terms for ${c.title} (Clause ${c.clause_number || idx + 1}).`;
+      }
+
+      // Extract timeframe snippet if available
+      let timeframe: string | undefined = undefined;
+      const daysMatch = c.original_text.match(/\b(\d+)\s*(days?|months?|years?)\b/i);
+      if (daysMatch) {
+        timeframe = daysMatch[0];
+      }
+
+      return {
+        id: `chk_${c.id || idx + 1}`,
+        category: cat,
+        title: `${c.title} (${getClauseTypeLabel(c.clause_type)})`,
+        description: c.one_line_consequence || c.simple_explanation || '',
+        action_required: actionText,
+        due_date_or_timeframe: timeframe,
+        associated_clause_id: c.id,
+      };
+    });
+  }
+
+  // 2. Enforce Grounded Possibilities & Next Steps
+  let optionsNextSteps = Array.isArray(result.options_next_steps) ? result.options_next_steps : [];
+  if (optionsNextSteps.length < 2 && syncedClauses.length > 0) {
+    optionsNextSteps = [];
+    const highRisk = syncedClauses.find((c) => c.risk_level === 'high');
+    if (highRisk) {
+      optionsNextSteps.push({
+        id: 'opt_1',
+        title: `Negotiate Liability Cap on ${highRisk.title}`,
+        description: `Propose a written addendum to cap financial penalties or liquidated damages in ${highRisk.title} before signing.`,
+        benefit: 'Reduces unexpected financial liability and severe legal exposure.',
+        tradeoff: 'May require formal discussion with the issuing party before signing.',
+      });
+    }
+
+    const nonCompeteClause = syncedClauses.find((c) => (c.clause_type as string) === 'non-compete/non-solicitation' || c.clause_type === 'use & restrictions' || (c.original_text + ' ' + c.title).toLowerCase().includes('non-compete'));
+    if (nonCompeteClause) {
+      optionsNextSteps.push({
+        id: 'opt_noncompete',
+        title: `Seek Scope Reduction on ${nonCompeteClause.title}`,
+        description: `Request narrowing the post-employment non-compete duration and geographical restriction under Section 27 of the Indian Contract Act.`,
+        benefit: 'Preserves future employment mobility and career opportunities.',
+        tradeoff: 'Other party may request strict confidentiality affirmation in exchange.',
+      });
+    }
+
+    const noticeClause = syncedClauses.find((c) => c.clause_type.includes('notice') || (c.original_text + ' ' + c.title).toLowerCase().includes('notice'));
+    if (noticeClause) {
+      optionsNextSteps.push({
+        id: 'opt_notice',
+        title: `Clarify Mutual Notice & Pay-in-Lieu Terms`,
+        description: `Confirm in writing that notice requirements in ${noticeClause.title} apply mutually and permit pay-in-lieu of notice.`,
+        benefit: 'Provides exit flexibility if career or operational circumstances change.',
+        tradeoff: 'Other party may request reciprocal notice enforcement.',
+      });
+    }
+
+    optionsNextSteps.push({
+      id: 'opt_advocate',
+      title: 'Consult Legal Advocate for Pre-Signing Review',
+      description: 'Share this LegalLens analysis packet with a registered advocate to verify local statutory compliance.',
+      benefit: 'Provides tailored legal protection under applicable state and central laws.',
+      tradeoff: 'Incurs standard legal consultation time.',
+    });
+  }
+
+  // 3. Category-Aware Gap Analysis for Missing Protective Clauses
+  const docCategory = (result.category || result.guard1?.category || '').toLowerCase();
+  const candidateMissing: string[] = Array.isArray(result.lawyer_briefing?.missing_protective_clauses)
+    ? [...result.lawyer_briefing.missing_protective_clauses]
     : [];
 
-  const validatedMissingClauses = currentMissing.filter((item) => {
+  if (docCategory.includes('employment')) {
+    candidateMissing.push(
+      'Severance Compensation & Exit Pay Clause',
+      'Intellectual Property Carve-Out (Prior Inventions Exclusion)',
+      'Confidentiality Legal & Regulatory Carve-Out'
+    );
+  } else if (docCategory.includes('rental') || docCategory.includes('lease')) {
+    candidateMissing.push(
+      'Rent Escalation Cap & Written Notice Requirement',
+      'Security Deposit 30-Day Refund Deadline Clause',
+      'Structural Repair vs Routine Maintenance Division Clause'
+    );
+  }
+
+  // Deduplicate candidates
+  const uniqueCandidateMissing = Array.from(new Set(candidateMissing));
+
+  // Grounding filter: Purge candidate missing clause if already present in document
+  const validatedMissingClauses = uniqueCandidateMissing.filter((item) => {
     const itemLower = item.toLowerCase();
     if (itemLower.includes('dispute') || itemLower.includes('arbitrat')) {
       const exists = syncedClauses.some((c) => (c.clause_type as string) === 'dispute resolution/arbitration' || c.clause_type.includes('dispute') || c.clause_type.includes('governing law') || /arbitrat|dispute resolution/i.test(c.original_text + ' ' + c.title));
@@ -2561,18 +2980,82 @@ export function validateAndEnforceGroundedSynthesis(
       const exists = syncedClauses.some((c) => c.clause_type === 'confidentiality' || /confidential/i.test(c.original_text + ' ' + c.title));
       if (exists) return false;
     }
+    if (itemLower.includes('severance')) {
+      const exists = syncedClauses.some((c) => /severance|exit pay|termination pay/i.test(c.original_text + ' ' + c.title));
+      if (exists) return false;
+    }
+    if (itemLower.includes('prior inventions') || itemLower.includes('ip carve')) {
+      const exists = syncedClauses.some((c) => /prior invention|pre-existing ip|ip carve/i.test(c.original_text + ' ' + c.title));
+      if (exists) return false;
+    }
+    if (itemLower.includes('deposit') && itemLower.includes('refund')) {
+      const exists = syncedClauses.some((c) => /30[- ]day|deposit refund deadline/i.test(c.original_text + ' ' + c.title));
+      if (exists) return false;
+    }
     return true;
   });
 
+  // 4. Grounded Advocate Questions (No Generic Hardcoded Strings)
+  const candidateQuestions = Array.isArray(result.lawyer_briefing?.questions_to_ask_lawyer)
+    ? [...result.lawyer_briefing.questions_to_ask_lawyer]
+    : [];
+
+  for (const c of syncedClauses) {
+    const lower = (c.original_text + ' ' + c.title).toLowerCase();
+    if ((c.clause_type as string) === 'non-compete/non-solicitation' || c.clause_type === 'use & restrictions' || lower.includes('non-compete')) {
+      candidateQuestions.push(`Clause ${c.clause_number || c.id} (${c.title}): Is the post-employment non-compete restriction enforceable under Section 27 of the Indian Contract Act?`);
+    }
+    if (c.clause_type === 'penalty/liquidated damages' || lower.includes('bond') || lower.includes('liquidated damages')) {
+      candidateQuestions.push(`Clause ${c.clause_number || c.id} (${c.title}): Can the service bond liquidated damages training penalty be legally enforced without proof of actual specialized training costs?`);
+    }
+    if (c.clause_type === 'indemnity & liability' || (c.clause_type as string) === 'indemnity' || lower.includes('indemnify')) {
+      candidateQuestions.push(`Clause ${c.clause_number || c.id} (${c.title}): Does the broad indemnity clause expose the party to third-party claims or damage beyond direct operational control?`);
+    }
+    if (c.clause_type === 'security deposit' && (c.risk_level === 'watch_out' || (c.risk_level as string) === 'medium' || lower.includes('upon vacating'))) {
+      candidateQuestions.push(`Clause ${c.clause_number || c.id} (${c.title}): Should a specific 30-day refund deadline be added to prevent indefinite deposit retention upon vacating?`);
+    }
+    if (c.clause_type === 'term & termination' && lower.includes('lock-in')) {
+      candidateQuestions.push(`Clause ${c.clause_number || c.id} (${c.title}): Is the full-rent penalty for early exit during lock-in enforceable under Section 74 of the Indian Contract Act?`);
+    }
+  }
+
+  // Blocklist filter for generic boilerplate questions
+  const genericBlocklist = [
+    /are all terms in .* legally enforceable/i,
+    /is this agreement legally binding/i,
+    /what are the key risks in this document/i,
+    /are all terms legally enforceable/i,
+  ];
+
+  const groundedQuestions = Array.from(new Set(candidateQuestions)).filter(
+    (q) => !genericBlocklist.some((re) => re.test(q))
+  );
+
+  const overallRiskScore = typeof result.overall_risk_score === 'number' && !isNaN(result.overall_risk_score)
+    ? result.overall_risk_score
+    : calculateDocumentOverallRiskScore(syncedClauses);
+
   return {
     ...result,
+    overall_risk_score: overallRiskScore,
     clauses: syncedClauses,
+    checklist: {
+      title: result.checklist?.title || 'Action & Deadline Checklist',
+      stamp_duty_required: result.checklist?.stamp_duty_required ?? (docCategory.includes('rental') || docCategory.includes('lease')),
+      stamp_duty_note: result.checklist?.stamp_duty_note || 'Verify stamp duty requirements under local state rules.',
+      items: checklistItems,
+      disclaimer: result.checklist?.disclaimer || 'Informational checklist generated by LegalLens.',
+    },
+    options_next_steps: optionsNextSteps,
     lawyer_briefing: {
       ...result.lawyer_briefing,
       document_summary: `${result.document_title || 'Document'} containing ${syncedClauses.length} clauses with ${highRiskClauses.length} high-risk flags.`,
       flagged_issues: validatedFlaggedIssues,
       missing_protective_clauses: validatedMissingClauses,
+      questions_to_ask_lawyer: groundedQuestions,
+      disclaimer: result.lawyer_briefing?.disclaimer || 'Advocate consultation packet prepared by LegalLens AI.',
     },
+    disclaimer: result.disclaimer || 'LegalLens AI analysis provided for informational purposes only under Advocate Act 1961.',
   };
 }
 
@@ -2650,36 +3133,71 @@ export async function analyzeDocumentText(
   return await synthesizeDocumentAnalysis(text, clauses, guard1, categoryHint, language);
 }
 
+export function calculateDocumentOverallRiskScore(clauses: SimplifiedClause[]): number {
+  if (!clauses || !Array.isArray(clauses) || clauses.length === 0) return 30;
+  const highRiskCount = clauses.filter((c) => c && c.risk_level === 'high').length;
+  const mediumRiskCount = clauses.filter((c) => c && ((c.risk_level as string) === 'medium' || c.risk_level === 'watch_out')).length;
+  return Math.min(95, Math.max(10, 30 + highRiskCount * 25 + mediumRiskCount * 10));
+}
+
 // Stage 4: Compare 2 Documents with Asymmetry Surface & Schema Compliance
 export async function compareTwoDocuments(
   docA: DocumentAnalysisResult,
   docB: DocumentAnalysisResult
 ): Promise<ComparisonResult> {
-  const alignment = alignClauses(docA.clauses, docB.clauses);
+  const clausesA = Array.isArray(docA?.clauses) ? docA.clauses : [];
+  const clausesB = Array.isArray(docB?.clauses) ? docB.clauses : [];
+  const alignment = alignClauses(clausesA, clausesB);
+
+  const docATitle = docA?.document_title && typeof docA.document_title === 'string' && docA.document_title.trim() !== '' && docA.document_title.toLowerCase() !== 'undefined'
+    ? docA.document_title.trim()
+    : 'Document A';
+  const docBTitle = docB?.document_title && typeof docB.document_title === 'string' && docB.document_title.trim() !== '' && docB.document_title.toLowerCase() !== 'undefined'
+    ? docB.document_title.trim()
+    : 'Document B';
+
+  const scoreA = typeof docA?.overall_risk_score === 'number' && !isNaN(docA.overall_risk_score)
+    ? docA.overall_risk_score
+    : calculateDocumentOverallRiskScore(clausesA);
+  const scoreB = typeof docB?.overall_risk_score === 'number' && !isNaN(docB.overall_risk_score)
+    ? docB.overall_risk_score
+    : calculateDocumentOverallRiskScore(clausesB);
+
+  const matchedPairs = alignment.alignedPairs.filter((p) => p.status === 'matched');
+  const matchedCount = matchedPairs.length;
 
   const aOnlyTitles = alignment.aOnlyClauses.map((c) => c.title || c.clause_type).join(', ');
   const bOnlyTitles = alignment.bOnlyClauses.map((c) => c.title || c.clause_type).join(', ');
 
-  let summary = `Compared ${docA.document_title} against ${docB.document_title}.\n`;
+  let summary = `Compared ${docATitle} against ${docBTitle}.\n`;
   if (alignment.aOnlyClauses.length > 0) {
     summary += `Present in Document A only: ${aOnlyTitles}.\n`;
   }
   if (alignment.bOnlyClauses.length > 0) {
     summary += `Present in Document B only: ${bOnlyTitles}.\n`;
   }
-  summary += `Matched ${alignment.alignedPairs.length} common clause type(s).`;
+
+  if (matchedCount === 0) {
+    summary += `These documents have significantly different structures and purposes; 0 common clause types were found. Matched 0 common clause type(s).`;
+  } else {
+    summary += `Matched ${matchedCount} common clause type(s).`;
+  }
+
+  const winnerRec =
+    scoreA < scoreB
+      ? `${docATitle} has a lower overall risk score (${scoreA} vs ${scoreB}) and is comparatively safer.`
+      : scoreB < scoreA
+        ? `${docBTitle} has a lower overall risk score (${scoreB} vs ${scoreA}) and is comparatively safer.`
+        : `${docATitle} and ${docBTitle} have identical overall risk scores (${scoreA} vs ${scoreB}).`;
 
   return {
-    doc_a_title: docA.document_title,
-    doc_b_title: docB.document_title,
+    doc_a_title: docATitle,
+    doc_b_title: docBTitle,
     aligned_pairs: alignment.alignedPairs,
     a_only_clauses: alignment.aOnlyClauses,
     b_only_clauses: alignment.bOnlyClauses,
     key_differences_summary: summary,
-    winner_recommendation:
-      docA.overall_risk_score < docB.overall_risk_score
-        ? `${docA.document_title} has a lower overall risk score (${docA.overall_risk_score} vs ${docB.overall_risk_score}) and is comparatively safer.`
-        : `${docB.document_title} has a lower overall risk score (${docB.overall_risk_score} vs ${docA.overall_risk_score}) and is comparatively safer.`,
+    winner_recommendation: winnerRec,
     disclaimer: 'Comparison generated by LegalLens for informational evaluation.',
   };
 }

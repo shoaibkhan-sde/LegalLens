@@ -489,11 +489,16 @@ export const RoboAiAssistant: React.FC<RoboAiAssistantProps> = ({
     );
   }
 
+  const heightClass =
+    sectionId === 'analyze'
+      ? 'h-full min-h-[460px] sm:min-h-[500px]'
+      : 'h-[520px] sm:h-[560px] lg:h-[600px] max-h-[calc(100vh-7rem)]';
+
   // If open: Render Embedded Chat Screen with Fixed Height, History & Clean Controls
   return (
     <div
       id="robo-assistant-container"
-      className="bg-[#FBF8F1] border-2 border-[#E7E1D3] rounded-2xl shadow-md overflow-hidden flex flex-col h-[500px] lg:h-full lg:absolute lg:inset-0 animate-chat-popin relative scroll-mt-6"
+      className={`bg-[#FBF8F1] border-2 border-[#E7E1D3] rounded-2xl shadow-md overflow-hidden flex flex-col ${heightClass} animate-chat-popin relative scroll-mt-6`}
     >
       {/* Header Bar */}
       <div className="bg-gradient-to-r from-[#F6F1E7] via-[#FBF8F1] to-[#F6F1E7] px-4 py-3 border-b border-[#E7E1D3] flex items-center justify-between shrink-0 relative">

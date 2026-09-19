@@ -4,6 +4,8 @@ import {
   chunkDocumentTextIntoClauses,
   synthesizeDocumentAnalysis,
   detectCrossClauseConflicts,
+  isTemplateExplanation,
+  hasVerbatimQuoteOverlap,
 } from '../services/astraBackend';
 import {
   normalizeClauseType,
@@ -102,10 +104,9 @@ async function runPipelineBugsTests() {
   }
 
   // ----------------------------------------------------
-  // TEST 2 (b): CI GREP OVER CODEBASE FOR TEMPLATE STRING
+  // TEST 2 (b): CI STRUCTURAL CODEBASE GREP GUARD FOR TEMPLATE PATTERNS
   // ----------------------------------------------------
-  console.log('\n--- TEST 2 (b): CODEBASE GREP GUARD FOR HARDCODED TEMPLATE STRING ---');
-  const templatePattern = 'This clause defines terms for';
+  console.log('\n--- TEST 2 (b): CODEBASE GREP & STRUCTURAL AUDIT GUARD FOR TEMPLATE PATTERNS ---');
   const srcDir = path.resolve(process.cwd(), 'src');
   const serverSrcDir = path.resolve(process.cwd(), 'server/src');
 
@@ -120,7 +121,9 @@ async function runPipelineBugsTests() {
       } else if (entry.isFile() && (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx'))) {
         if (entry.name.endsWith('.test.ts') || entry.name.endsWith('.test.tsx')) continue;
         const content = fs.readFileSync(fullPath, 'utf8');
-        if (content.includes(templatePattern)) {
+        const lines = content.split(/\r?\n/).filter(line => !line.includes('isTemplateExplanation') && !line.includes('engPattern') && !line.includes('hindiPattern'));
+        const filteredContent = lines.join('\n');
+        if (/this\s+clause\s+(defines|specifies|sets\s+out|establishes|covers)\s+(terms|binding\s+obligations|obligations)\s+for/i.test(filteredContent)) {
           console.error(`❌ [FAIL] Found hardcoded template string in production file: ${fullPath}`);
           found = true;
         }
@@ -131,7 +134,7 @@ async function runPipelineBugsTests() {
 
   const foundTemplateInCode = checkDirForTemplateString(srcDir) || checkDirForTemplateString(serverSrcDir);
   if (!foundTemplateInCode) {
-    console.log(`✅ [PASS] Test 2 (b): Production codebase contains zero occurrences of '${templatePattern}'.`);
+    console.log(`✅ [PASS] Test 2 (b): Production codebase contains zero hardcoded fallback explanation template patterns.`);
   } else {
     passed = false;
   }
@@ -200,25 +203,35 @@ async function runPipelineBugsTests() {
       console.log('✅ [PASS] Test 1: Every clause has distinct simple and ultra-simple plain language explanations.');
     }
 
-    // TEST 2 (a): Runtime assertion no template string in output
-    console.log('\n--- TEST 2 (a): RUNTIME OUTPUT TEMPLATE GUARD ---');
-    let templateFoundInOutput = false;
+    // TEST 2 (a): Structural validation (no templates, no 8-gram verbatim quote overlaps)
+    console.log('\n--- TEST 2 (a): STRUCTURAL EXPLANATION & VERBATIM QUOTE GUARD ---');
+    let structuralViolation = false;
     for (const c of synthesisResult.clauses) {
-      if (
-        (c.simple_explanation && c.simple_explanation.includes(templatePattern)) ||
-        (c.very_simple_explanation && c.very_simple_explanation.includes(templatePattern))
-      ) {
-        console.error(`❌ [FAIL] Test 2 (a): Clause ${c.id} output contains hardcoded template string!`);
-        templateFoundInOutput = true;
-        passed = false;
+      if (c.simple_explanation && isTemplateExplanation(c.simple_explanation)) {
+        console.error(`❌ [FAIL] Test 2 (a): Clause ${c.id} (${c.title}) simple_explanation matched fallback template pattern!`);
+        structuralViolation = true;
+      }
+      if (c.very_simple_explanation && isTemplateExplanation(c.very_simple_explanation)) {
+        console.error(`❌ [FAIL] Test 2 (a): Clause ${c.id} (${c.title}) very_simple_explanation matched fallback template pattern!`);
+        structuralViolation = true;
+      }
+      if (c.simple_explanation && hasVerbatimQuoteOverlap(c.simple_explanation, c.original_text, 8)) {
+        console.error(`❌ [FAIL] Test 2 (a): Clause ${c.id} (${c.title}) simple_explanation has >=8-word verbatim quote overlap with original text!`);
+        structuralViolation = true;
+      }
+      if (c.very_simple_explanation && hasVerbatimQuoteOverlap(c.very_simple_explanation, c.original_text, 8)) {
+        console.error(`❌ [FAIL] Test 2 (a): Clause ${c.id} (${c.title}) very_simple_explanation has >=8-word verbatim quote overlap with original text!`);
+        structuralViolation = true;
       }
       if (c.meaning_error && (c.simple_explanation !== null || c.very_simple_explanation !== null)) {
         console.error(`❌ [FAIL] Test 2 (a): Clause ${c.id} has meaning_error=true but explanation fields are not null!`);
-        passed = false;
+        structuralViolation = true;
       }
     }
-    if (!templateFoundInOutput) {
-      console.log('✅ [PASS] Test 2 (a): Zero runtime output clauses contain fallback template strings.');
+    if (!structuralViolation) {
+      console.log('✅ [PASS] Test 2 (a): All runtime clause explanations passed structural template & 8-gram verbatim quote checks.');
+    } else {
+      passed = false;
     }
   }
 
@@ -230,14 +243,19 @@ async function runPipelineBugsTests() {
   if (hindiSynthesis && hindiSynthesis.clauses && hindiSynthesis.clauses.length > 0) {
     let hindiValid = true;
     for (const c of hindiSynthesis.clauses) {
-      if (c.simple_explanation && c.simple_explanation.includes(templatePattern)) {
-        console.error(`❌ [FAIL] Test 10: Hindi clause ${c.id} contains English fallback template!`);
+      if (c.simple_explanation && isTemplateExplanation(c.simple_explanation)) {
+        console.error(`❌ [FAIL] Test 10: Hindi clause ${c.id} contains fallback template!`);
+        hindiValid = false;
+        passed = false;
+      }
+      if (c.simple_explanation && hasVerbatimQuoteOverlap(c.simple_explanation, c.original_text, 8)) {
+        console.error(`❌ [FAIL] Test 10: Hindi clause ${c.id} contains >=8-word verbatim quote overlap!`);
         hindiValid = false;
         passed = false;
       }
     }
     if (hindiValid) {
-      console.log('✅ [PASS] Test 10: Hindi analysis returned valid localized response without English fallback templates.');
+      console.log('✅ [PASS] Test 10: Hindi analysis returned valid localized response without fallback templates or verbatim quotes.');
     }
   }
 

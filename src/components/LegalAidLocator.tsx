@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { MapPin, Phone, Shield, ExternalLink, Search, Info, Clock, Globe } from 'lucide-react';
 
 import { useLanguage } from '../context/LanguageContext';
+import { saveStorage, loadStorage, clearFeatureStorage } from '../utils/persistence';
 
 interface DLSACenter {
   state: string;
@@ -70,8 +71,27 @@ const SAMPLE_DLSA_CENTERS: DLSACenter[] = [
 export const LegalAidLocator: React.FC = () => {
   const { language, t } = useLanguage();
   const isHi = language === 'hi';
-  const [selectedState, setSelectedState] = useState<string>('All');
-  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedState, setSelectedStateState] = useState<string>(() => {
+    return loadStorage<string>('legallens_legalaid_state', 'All');
+  });
+  const setSelectedState = (val: string) => {
+    setSelectedStateState(val);
+    saveStorage('legallens_legalaid_state', val);
+  };
+
+  const [searchQuery, setSearchQueryState] = useState<string>(() => {
+    return loadStorage<string>('legallens_legalaid_search', '');
+  });
+  const setSearchQuery = (val: string) => {
+    setSearchQueryState(val);
+    saveStorage('legallens_legalaid_search', val);
+  };
+
+  const handleClearFilters = () => {
+    setSelectedState('All');
+    setSearchQuery('');
+    clearFeatureStorage('legallens_legalaid_');
+  };
 
   const filteredCenters = SAMPLE_DLSA_CENTERS.filter((center) => {
     const matchesState = selectedState === 'All' || center.state === selectedState;

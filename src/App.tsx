@@ -17,9 +17,18 @@ import { Footer } from './components/Footer';
 import { ApiClient } from './services/apiClient';
 import { SpeechEngine } from './utils/speech';
 import { DocumentAnalysisResult, SimplifiedClause, ServerConfigStatus, ActiveInputContext } from './types/schemas';
-import { ShieldCheck, ShieldAlert, Layers, AlertOctagon, Zap, Sparkles, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, Layers, AlertOctagon, Zap, Sparkles, ChevronLeft, ChevronRight, Upload } from 'lucide-react';
 
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
+
+import {
+  saveStorage,
+  loadStorage,
+  saveErrorStorage,
+  loadErrorStorage,
+  clearFeatureStorage,
+  subscribeStorageWarning,
+} from './utils/persistence';
 
 const TAB_STORAGE_KEY = 'legallens_active_tab';
 
@@ -50,9 +59,15 @@ const getTabFromPathOrStorage = (): 'analyze' | 'compare' | 'legal_aid' => {
 };
 
 function AppContent() {
-  const { t } = useLanguage();
+  const { language, t } = useLanguage();
   const [activeTab, setActiveTabState] = useState<'analyze' | 'compare' | 'legal_aid'>(getTabFromPathOrStorage);
-  const [readingLevel, setReadingLevel] = useState<'simple' | 'very_simple'>('simple');
+  const [readingLevel, setReadingLevelState] = useState<'simple' | 'very_simple'>(() => {
+    return loadStorage<'simple' | 'very_simple'>('legallens_analyze_reading_level', 'simple');
+  });
+  const setReadingLevel = (level: 'simple' | 'very_simple') => {
+    setReadingLevelState(level);
+    saveStorage('legallens_analyze_reading_level', level);
+  };
   const [configStatus, setConfigStatus] = useState<ServerConfigStatus>(() => {
     try {
       const saved = localStorage.getItem('legallens_config_status');
@@ -66,6 +81,13 @@ function AppContent() {
     };
   });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [storageWarning, setStorageWarning] = useState<string | null>(null);
+
+  useEffect(() => {
+    return subscribeStorageWarning((msg) => {
+      setStorageWarning(msg);
+    });
+  }, []);
 
   const handleSelectTab = (tab: 'analyze' | 'compare' | 'legal_aid', pushHistory = true) => {
     setActiveTabState(tab);
@@ -104,12 +126,57 @@ function AppContent() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  const [documentAnalysis, setDocumentAnalysis] = useState<DocumentAnalysisResult | null>(null);
-  const [activeInputContext, setActiveInputContext] = useState<ActiveInputContext | null>(null);
+  const [captureTab, setCaptureTabState] = useState<'upload' | 'camera' | 'sample'>(() => {
+    return loadStorage<'upload' | 'camera' | 'sample'>('legallens_analyze_tab', 'upload');
+  });
+  const setCaptureTab = (tab: 'upload' | 'camera' | 'sample') => {
+    setCaptureTabState(tab);
+    saveStorage('legallens_analyze_tab', tab);
+  };
+
+  const [userDocumentAnalysis, setUserDocumentAnalysisState] = useState<DocumentAnalysisResult | null>(() => {
+    return loadStorage<DocumentAnalysisResult | null>('legallens_analyze_result', null);
+  });
+  const setUserDocumentAnalysis = (val: DocumentAnalysisResult | null) => {
+    setUserDocumentAnalysisState(val);
+    saveStorage('legallens_analyze_result', val);
+  };
+
+  const [sampleDocumentAnalysis, setSampleDocumentAnalysisState] = useState<DocumentAnalysisResult | null>(() => {
+    return loadStorage<DocumentAnalysisResult | null>('legallens_sample_analyze_result', null);
+  });
+  const setSampleDocumentAnalysis = (val: DocumentAnalysisResult | null) => {
+    setSampleDocumentAnalysisState(val);
+    saveStorage('legallens_sample_analyze_result', val);
+  };
+
+  const documentAnalysis = captureTab === 'sample' ? sampleDocumentAnalysis : userDocumentAnalysis;
+  const isSampleModeActive = captureTab === 'sample' && Boolean(sampleDocumentAnalysis);
+
+  const [activeInputContext, setActiveInputContextState] = useState<ActiveInputContext | null>(() => {
+    return loadStorage<ActiveInputContext | null>('legallens_analyze_input_context', null);
+  });
+  const setActiveInputContext = (val: ActiveInputContext | null) => {
+    setActiveInputContextState(val);
+    saveStorage('legallens_analyze_input_context', val);
+  };
+
   const [isLoading, setIsLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessageState] = useState<string | null>(() => {
+    return loadErrorStorage('legallens_analyze_error_message');
+  });
+  const setErrorMessage = (val: string | null) => {
+    setErrorMessageState(val);
+    saveErrorStorage('legallens_analyze_error_message', val);
+  };
   const [highlightedClauseId, setHighlightedClauseId] = useState<string | null>(null);
-  const [activeClauseId, setActiveClauseId] = useState<string | null>(null);
+  const [activeClauseId, setActiveClauseIdState] = useState<string | null>(() => {
+    return loadStorage<string | null>('legallens_analyze_active_clause_id', null);
+  });
+  const setActiveClauseId = (val: string | null) => {
+    setActiveClauseIdState(val);
+    saveStorage('legallens_analyze_active_clause_id', val);
+  };
   const [selectedShareClause, setSelectedShareClause] = useState<SimplifiedClause | null>(null);
   const [isChatOpen, setIsChatOpen] = useState<boolean>(() => {
     try {
@@ -261,12 +328,16 @@ function AppContent() {
       stepStatuses: ['pending', 'pending', 'pending', 'pending', 'pending'],
       elapsedMs: {},
     });
-    setDocumentAnalysis(null);
+    setUserDocumentAnalysis(null);
+    setSampleDocumentAnalysis(null);
     setErrorMessage(null);
     setActiveClauseId(null);
+    setActiveInputContext(null);
+    clearFeatureStorage('legallens_analyze_');
+    clearFeatureStorage('legallens_actionable_');
   };
 
-  const handleAnalyzeText = async (text: string, file?: File) => {
+  const handleAnalyzeText = async (text: string, file?: File, source: 'user' | 'sample' = 'user') => {
     // Increment request token and create new AbortController
     activeRequestIdRef.current += 1;
     const currentReqId = activeRequestIdRef.current;
@@ -278,7 +349,11 @@ function AppContent() {
     abortControllerRef.current = controller;
 
     setIsLoading(true);
-    setDocumentAnalysis(null);
+    if (source === 'sample') {
+      setSampleDocumentAnalysis(null);
+    } else {
+      setUserDocumentAnalysis(null);
+    }
     setErrorMessage(null);
     setActiveClauseId(null);
     setPipelineProgress({
@@ -286,6 +361,17 @@ function AppContent() {
       stepStatuses: ['in_progress', 'pending', 'pending', 'pending', 'pending'],
       elapsedMs: {},
     });
+
+    setTimeout(() => {
+      if (typeof window !== 'undefined') {
+        const pipelineElem = window.document.getElementById('architectural-pipeline-container');
+        if (pipelineElem) {
+          pipelineElem.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else {
+          window.scrollTo({ top: 380, behavior: 'smooth' });
+        }
+      }
+    }, 100);
 
     try {
       const result = await ApiClient.analyzeDocument(
@@ -320,7 +406,11 @@ function AppContent() {
 
       if (currentReqId !== activeRequestIdRef.current) return;
 
-      setDocumentAnalysis(result);
+      if (source === 'sample') {
+        setSampleDocumentAnalysis(result);
+      } else {
+        setUserDocumentAnalysis(result);
+      }
       if (result.clauses && result.clauses.length > 0) {
         setActiveClauseId(result.clauses[0].id);
       }
@@ -379,6 +469,32 @@ function AppContent() {
             {/* Split Hero Section with Editorial Illustration */}
             <HeroHeader />
 
+            {/* Storage Quota / Permission Warning Banner */}
+            {storageWarning && (
+              <div
+                className="bg-[#FFFBEB] border-2 border-[#FDE68A] rounded-2xl p-4 flex items-center justify-between text-xs text-[#92400E] shadow-md animate-fade-in-up"
+              >
+                <div className="flex items-center space-x-3">
+                  <div className="w-9 h-9 rounded-xl bg-[#92400E]/10 flex items-center justify-center shrink-0 border border-[#92400E]/20">
+                    <AlertOctagon className="w-5 h-5 text-[#92400E]" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-[11px] uppercase tracking-wider text-[#92400E]">
+                      Storage Warning
+                    </div>
+                    <span className="font-semibold text-xs text-[#78350F] mt-0.5 block">{storageWarning}</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setStorageWarning(null)}
+                  className="p-1.5 rounded-lg hover:bg-[#FDE68A]/40 text-[#92400E] font-bold text-sm transition-colors cursor-pointer shrink-0"
+                  title="Dismiss warning"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
             {/* Error Message Banner (Auto-scrolled into view when Guard 1 triggers) */}
             {errorMessage && (
               <div
@@ -421,14 +537,40 @@ function AppContent() {
             )}
 
             {/* Top Section: Dynamic Grid (100% width when chat closed, 50%/50% equal area split when chat open) */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 transition-all duration-300 items-stretch">
+            <div className={`grid grid-cols-1 lg:grid-cols-12 gap-6 transition-all duration-300 ${isChatOpen ? 'items-stretch' : 'items-start'}`}>
               {/* Document Capture Area */}
               <div className={`${isChatOpen ? 'lg:col-span-6' : 'lg:col-span-12'} transition-all duration-300`}>
                 <DocumentCapture
                   onAnalyzeText={handleAnalyzeText}
                   isLoading={isLoading}
+                  hasCompletedAnalysis={Boolean(userDocumentAnalysis || sampleDocumentAnalysis)}
                   onInputContextChange={setActiveInputContext}
                   onCancelAnalysis={handleCancelAnalysis}
+                  activeTab={captureTab}
+                  onTabChange={setCaptureTab}
+                  onClearUserAnalysis={() => {
+                    setUserDocumentAnalysis(null);
+                    setErrorMessage(null);
+                    setActiveClauseId(null);
+                    setPipelineProgress({
+                      activeStep: 0,
+                      stepStatuses: ['pending', 'pending', 'pending', 'pending', 'pending'],
+                      elapsedMs: {},
+                    });
+                    clearFeatureStorage('legallens_analyze_');
+                    clearFeatureStorage('legallens_actionable_');
+                  }}
+                  onClearSampleAnalysis={() => {
+                    setSampleDocumentAnalysis(null);
+                    setErrorMessage(null);
+                    setActiveClauseId(null);
+                    setPipelineProgress({
+                      activeStep: 0,
+                      stepStatuses: ['pending', 'pending', 'pending', 'pending', 'pending'],
+                      elapsedMs: {},
+                    });
+                    clearFeatureStorage('legallens_sample_');
+                  }}
                 />
               </div>
 
@@ -436,7 +578,7 @@ function AppContent() {
               {isChatOpen && (
                 <div
                   id="legal-chat-container"
-                  className="lg:col-span-6 transition-all duration-300 animate-fade-in-up relative min-h-[500px] lg:min-h-0 scroll-mt-6"
+                  className="lg:col-span-6 transition-all duration-300 animate-fade-in-up relative lg:sticky lg:top-24 scroll-mt-6 h-full flex flex-col"
                 >
                   <RoboAiAssistant
                     sectionId="analyze"
@@ -464,6 +606,34 @@ function AppContent() {
             {/* Document Analysis Dashboard Workspace */}
             {documentAnalysis && !isLoading && (
               <div className="space-y-6">
+                {/* Sample Demonstration Mode Banner */}
+                {isSampleModeActive && (
+                  <div className="bg-[#FFF8F0] border-2 border-[#B85C38] rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 text-xs shadow-sm ring-4 ring-[#B85C38]/10 animate-fade-in-up">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-8 h-8 rounded-xl bg-[#B85C38]/15 flex items-center justify-center shrink-0 border border-[#B85C38]/30">
+                        <Sparkles className="w-4 h-4 text-[#B85C38]" />
+                      </div>
+                      <div>
+                        <div className="font-extrabold uppercase tracking-wider text-[#B85C38] text-[11px]">
+                          Sample Demonstration Mode
+                        </div>
+                        <span className="font-semibold text-[#1E1B17]">
+                          {language === 'hi'
+                            ? 'आप एक नमूना समझौते (Sample Agreement) का प्रदर्शन विश्लेषण देख रहे हैं।'
+                            : 'You are viewing a sample agreement demonstration analysis.'}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setCaptureTab('upload')}
+                      className="px-3.5 py-1.5 bg-[#B85C38] hover:bg-[#9C4B2B] text-white text-xs font-bold rounded-lg transition-colors cursor-pointer shadow-xs flex items-center space-x-1.5"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>{language === 'hi' ? 'अपना खुद का दस्तावेज़ विश्लेषण करें' : 'Analyze Your Own Document'}</span>
+                    </button>
+                  </div>
+                )}
                 {/* Summary Overview Banner (Placed immediately below Uploader button) */}
                 <div className="bg-[#FBF8F1] border border-[#E7E1D3] rounded-2xl p-5 md:p-6 shadow-xs space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E7E1D3] pb-3">
@@ -739,7 +909,7 @@ function AppContent() {
         )}
 
         {/* Tab 2: Compare Contracts Workflow */}
-        {activeTab === 'compare' && <ComparisonView currentDocument={documentAnalysis} />}
+        {activeTab === 'compare' && <ComparisonView />}
 
         {/* Tab 3: Free Legal Aid Locator Workflow */}
         {activeTab === 'legal_aid' && <LegalAidLocator />}

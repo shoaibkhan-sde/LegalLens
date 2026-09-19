@@ -17,6 +17,7 @@ import {
   XCircle,
   Copy,
   Check,
+  Loader2,
 } from 'lucide-react';
 import { isMobileDevice } from '../utils/device';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
@@ -26,32 +27,63 @@ import { ActiveInputContext } from '../types/schemas';
 import { ApiClient } from '../services/apiClient';
 import { useLanguage } from '../context/LanguageContext';
 import { PDFDocument } from 'pdf-lib';
-import { MAX_PDF_PAGES, MAX_PDF_PAGES_ERROR_MSG } from '../utils/constants';
+import {
+  MAX_PDF_PAGES,
+  MAX_PDF_PAGES_ERROR_MSG,
+  MAX_PDF_PAGES_ERROR_MSG_HI,
+  MAX_PASTED_WORDS,
+  MAX_PASTED_WORDS_ERROR_MSG,
+  MAX_PASTED_WORDS_ERROR_MSG_HI,
+  countWords,
+  isWordLimitExceeded,
+} from '../utils/constants';
+
+import { saveStorage, loadStorage, clearFeatureStorage } from '../utils/persistence';
 
 interface DocumentCaptureProps {
-  onAnalyzeText: (text: string, file?: File) => void;
+  onAnalyzeText: (text: string, file?: File, source?: 'user' | 'sample') => void;
   isLoading: boolean;
+  hasCompletedAnalysis?: boolean;
   onInputContextChange?: (context: ActiveInputContext) => void;
   onCancelAnalysis?: () => void;
+  activeTab?: 'upload' | 'camera' | 'sample';
+  onTabChange?: (tab: 'upload' | 'camera' | 'sample') => void;
+  onClearUserAnalysis?: () => void;
+  onClearSampleAnalysis?: () => void;
 }
 
 export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
   onAnalyzeText,
   isLoading,
+  hasCompletedAnalysis = false,
   onInputContextChange,
   onCancelAnalysis,
+  activeTab: propActiveTab,
+  onTabChange,
+  onClearUserAnalysis,
+  onClearSampleAnalysis,
 }) => {
-  const { t } = useLanguage();
+  const { language, t } = useLanguage();
   const [isMobile, setIsMobile] = useState<boolean>(() => isMobileDevice());
-  const [activeTab, setActiveTab] = useState<'upload' | 'camera' | 'sample'>(() => {
+  const [internalActiveTab, setInternalActiveTab] = useState<'upload' | 'camera' | 'sample'>(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       if (params.get('mode') === 'camera' || window.location.hash === '#camera') {
         return 'camera';
       }
     }
-    return 'upload';
+    return loadStorage<'upload' | 'camera' | 'sample'>('legallens_analyze_tab', 'upload');
   });
+
+  const activeTab = propActiveTab || internalActiveTab;
+
+  const setActiveTab = (tab: 'upload' | 'camera' | 'sample') => {
+    setInternalActiveTab(tab);
+    saveStorage('legallens_analyze_tab', tab);
+    if (onTabChange) {
+      onTabChange(tab);
+    }
+  };
 
   // Clean ?mode=camera and #camera from URL immediately on initial load to prevent re-triggering on refresh
   useEffect(() => {
@@ -96,9 +128,46 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
   const [cameraError, setCameraError] = useState<string>('');
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [uploadedFileName, setUploadedFileNameState] = useState<string>(() => {
+    return loadStorage<string>('legallens_analyze_file_name', '');
+  });
+  const setUploadedFileName = (name: string) => {
+    setUploadedFileNameState(name);
+    saveStorage('legallens_analyze_file_name', name);
+  };
+
+  const [uploadedFileSize, setUploadedFileSizeState] = useState<string>(() => {
+    return loadStorage<string>('legallens_analyze_file_size', '');
+  });
+  const setUploadedFileSize = (size: string) => {
+    setUploadedFileSizeState(size);
+    saveStorage('legallens_analyze_file_size', size);
+  };
+
   const [isDragging, setIsDragging] = useState<boolean>(false);
-  const [manualText, setManualText] = useState<string>('');
-  const [extractedFileText, setExtractedFileText] = useState<string>('');
+  const [manualText, setManualTextState] = useState<string>(() => {
+    return loadStorage<string>('legallens_analyze_pasted_text', '');
+  });
+  const setManualText = (val: string) => {
+    setManualTextState(val);
+    saveStorage('legallens_analyze_pasted_text', val);
+    if (!val.trim()) {
+      clearFeatureStorage('legallens_analyze_pasted_text');
+      if (!uploadedFile && !uploadedFileName && !capturedPhoto) {
+        if (onClearUserAnalysis) {
+          onClearUserAnalysis();
+        }
+      }
+    }
+  };
+
+  const [extractedFileText, setExtractedFileTextState] = useState<string>(() => {
+    return loadStorage<string>('legallens_analyze_extracted_text', '');
+  });
+  const setExtractedFileText = (val: string) => {
+    setExtractedFileTextState(val);
+    saveStorage('legallens_analyze_extracted_text', val);
+  };
   const [showQrModal, setShowQrModal] = useState<boolean>(false);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
 
@@ -108,9 +177,12 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
   // Extract inner file content / text automatically when a file is selected using unified single OCR & Parsing pipeline
   useEffect(() => {
     if (!uploadedFile) {
-      setExtractedFileText('');
+      // Do not wipe extractedFileText on page refresh if stored file metadata exists
       return;
     }
+
+    setUploadedFileName(uploadedFile.name);
+    setUploadedFileSize(formatFileSize(uploadedFile.size));
 
     const processUploadedFile = async () => {
       const isPdfFile = uploadedFile.type.includes('pdf') || uploadedFile.name.toLowerCase().endsWith('.pdf');
@@ -190,17 +262,21 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
 
   useEffect(() => {
     if (onInputContextChange) {
+      const activeFileName = uploadedFile?.name || uploadedFileName;
+      const activeFileSize = uploadedFile ? formatFileSize(uploadedFile.size) : uploadedFileSize;
+      const hasActiveFile = Boolean(uploadedFile || (uploadedFileName && extractedFileText));
+
       onInputContextChange({
-        uploadedFileName: uploadedFile?.name,
+        uploadedFileName: activeFileName || undefined,
         uploadedFileType: uploadedFile?.type,
-        uploadedFileSize: uploadedFile ? formatFileSize(uploadedFile.size) : undefined,
+        uploadedFileSize: activeFileSize || undefined,
         pastedText: manualText.trim() || undefined,
         extractedInputText: extractedFileText.trim() || undefined,
         capturedPhoto: !!capturedPhoto,
-        hasInput: !!uploadedFile || !!capturedPhoto || !!manualText.trim(),
+        hasInput: hasActiveFile || !!capturedPhoto || !!manualText.trim(),
       });
     }
-  }, [uploadedFile, manualText, capturedPhoto, extractedFileText, onInputContextChange]);
+  }, [uploadedFile, uploadedFileName, uploadedFileSize, manualText, capturedPhoto, extractedFileText, onInputContextChange]);
 
   useEffect(() => {
     if (activeTab === 'camera' && !capturedPhoto) {
@@ -253,11 +329,20 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
   const handleRetakePhoto = () => {
     setCapturedPhoto(null);
     startCamera();
+    if (onClearUserAnalysis) {
+      onClearUserAnalysis();
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setUploadedFile(e.target.files[0]);
+      const file = e.target.files[0];
+      setUploadedFile(file);
+      setUploadedFileName(file.name);
+      setUploadedFileSize(formatFileSize(file.size));
+      if (onClearUserAnalysis) {
+        onClearUserAnalysis();
+      }
     }
   };
 
@@ -287,12 +372,25 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const droppedFile = e.dataTransfer.files[0];
       setUploadedFile(droppedFile);
+      setUploadedFileName(droppedFile.name);
+      setUploadedFileSize(formatFileSize(droppedFile.size));
+      if (onClearUserAnalysis) {
+        onClearUserAnalysis();
+      }
     }
   };
 
   const handleClearFile = (e: React.MouseEvent) => {
     e.stopPropagation();
     setUploadedFile(null);
+    setUploadedFileName('');
+    setUploadedFileSize('');
+    setExtractedFileText('');
+    clearFeatureStorage('legallens_analyze_file');
+    clearFeatureStorage('legallens_analyze_extracted');
+    if (onClearUserAnalysis) {
+      onClearUserAnalysis();
+    }
   };
 
   const formatFileSize = (bytes: number): string => {
@@ -301,27 +399,92 @@ export const DocumentCapture: React.FC<DocumentCaptureProps> = ({
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
+  const getFileStatusMessage = () => {
+    if (isLoading) {
+      return language === 'hi'
+        ? 'दस्तावेज़ का विश्लेषण किया जा रहा है... कृपया प्रतीक्षा करें।'
+        : 'Analyzing document... Please wait while our AI audits key terms.';
+    }
+    if (hasCompletedAnalysis) {
+      return language === 'hi'
+        ? 'विश्लेषण पूर्ण। पूर्ण परिणाम नीचे प्रदर्शित हैं। नई फ़ाइल बदलने और फिर से विश्लेषण करने के लिए यहाँ डालें।'
+        : 'Analysis complete. Full results displayed below. Drop another file to replace and re-analyze.';
+    }
+    return t('capture.file_ready');
+  };
+
+  const getPastedTextStatusMessage = () => {
+    if (isLoading) {
+      return language === 'hi'
+        ? 'पाठ का विश्लेषण किया जा रहा है... कृपया प्रतीक्षा करें।'
+        : 'Analyzing pasted text... Please wait while our AI audits key terms.';
+    }
+    if (hasCompletedAnalysis) {
+      return language === 'hi'
+        ? 'विश्लेषण पूर्ण। पूर्ण परिणाम नीचे प्रदर्शित हैं। नया विश्लेषण शुरू करने के लिए पाठ संपादित करें।'
+        : 'Analysis complete. Full results displayed below. Edit text to re-analyze.';
+    }
+    return language === 'hi'
+      ? 'पाठ विश्लेषण के लिए तैयार है। नीचे दिए गए बटन पर क्लिक करें।'
+      : 'Pasted text ready for analysis. Click button below to analyze.';
+  };
+
   const handleSubmitPhoto = () => {
     if (capturedPhoto) {
       try {
         const photoFile = dataURLtoFile(capturedPhoto, 'camera_snapshot.png');
-        onAnalyzeText('', photoFile);
+        onAnalyzeText('', photoFile, 'user');
       } catch (err) {
         console.warn('Failed to convert captured photo to File:', err);
-        onAnalyzeText(extractedFileText || '');
+        onAnalyzeText(extractedFileText || '', undefined, 'user');
       }
     }
   };
 
   const handleSubmitFile = () => {
     if (uploadedFile) {
-      onAnalyzeText('', uploadedFile);
+      onAnalyzeText('', uploadedFile, 'user');
+    } else if (extractedFileText && (uploadedFileName || Boolean(extractedFileText.trim()))) {
+      onAnalyzeText(extractedFileText, undefined, 'user');
     } else if (manualText.trim()) {
-      onAnalyzeText(manualText.trim());
+      onAnalyzeText(manualText.trim(), undefined, 'user');
+    }
+  };
+
+  const [selectedSample, setSelectedSampleState] = useState<'rental' | 'employment' | null>(() => {
+    return loadStorage<'rental' | 'employment' | null>('legallens_sample_selected_type', null);
+  });
+  const setSelectedSample = (type: 'rental' | 'employment' | null) => {
+    setSelectedSampleState(type);
+    saveStorage('legallens_sample_selected_type', type);
+  };
+
+  useEffect(() => {
+    if (!isLoading && typeof window !== 'undefined') {
+      try {
+        const savedSampleResult = localStorage.getItem('legallens_sample_analyze_result');
+        if (!savedSampleResult || savedSampleResult === 'null') {
+          setSelectedSampleState(null);
+          localStorage.removeItem('legallens_sample_selected_type');
+        }
+      } catch {}
+    }
+  }, [isLoading]);
+
+  const handleClearSample = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedSample(null);
+    clearFeatureStorage('legallens_sample_');
+    if (onClearSampleAnalysis) {
+      onClearSampleAnalysis();
     }
   };
 
   const handleLoadSample = (sampleType: 'rental' | 'employment') => {
+    if (selectedSample === sampleType) {
+      return;
+    }
+    setSelectedSample(sampleType);
     if (sampleType === 'rental') {
       const rentalText = `RESIDENTIAL TENANCY AGREEMENT (BENGALURU, KARNATAKA)
 
@@ -353,10 +516,10 @@ The Lessor reserves the right to enter and inspect the premises with 24 hours pr
 
 9. INDEMNITY & DAMAGE LIABILITY
 The Lessee agrees to defend, indemnify, and hold harmless the Lessor against all legal claims, damages, or liabilities arising from Lessee's stay.`;
-      onAnalyzeText(rentalText);
+      onAnalyzeText(rentalText, undefined, 'sample');
     } else {
       const empText = `Employment Offer & Service Agreement\nTechNova Solutions appoints Senior Frontend Engineer at Gurugram office. CTC: ₹12,00,000.\nService Bond: 24 months tenure requirement or ₹3,00,000 training reimbursement penalty.\nNon-compete: 24 months post-employment non-compete restriction. Notice: 90 days.`;
-      onAnalyzeText(empText);
+      onAnalyzeText(empText, undefined, 'sample');
     }
   };
 
@@ -438,86 +601,93 @@ The Lessee agrees to defend, indemnify, and hold harmless the Lessor against all
       </div>
 
       {/* Tab 1: File Upload (Desktop Primary) */}
-      {activeTab === 'upload' && (
-        <div className="space-y-4">
-          <div
-            onDragOver={handleDragOver}
-            onDragEnter={handleDragEnter}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            onClick={() => {
-              const input = document.getElementById('file-upload-input');
-              if (input) input.click();
-            }}
-            className={`border-2 border-dashed rounded-xl p-6 transition-all duration-200 text-center space-y-3 cursor-pointer ${isDragging
-                ? 'border-[#B85C38] bg-[#B85C38]/10 scale-[1.01] shadow-md ring-4 ring-[#B85C38]/20'
-                : uploadedFile
-                  ? 'border-[#B85C38] bg-[#F6F1E7]'
-                  : 'border-[#CBD5E1] hover:border-[#B85C38] bg-[#F6F1E7]/60'
-              }`}
-          >
+      {activeTab === 'upload' && (() => {
+        const hasActiveUploadedFile = Boolean(uploadedFile || (uploadedFileName && extractedFileText));
+        const displayFileName = uploadedFile?.name || uploadedFileName;
+        const displayFileSize = uploadedFile ? formatFileSize(uploadedFile.size) : uploadedFileSize;
+
+        return (
+          <div className="space-y-4">
             <div
-              className={`w-12 h-12 rounded-xl flex items-center justify-center mx-auto transition-all duration-200 ${isDragging
-                  ? 'bg-[#B85C38] text-white scale-110'
-                  : 'bg-[#B85C38]/10 text-[#B85C38] border border-[#B85C38]/20'
+              onDragOver={handleDragOver}
+              onDragEnter={handleDragEnter}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onClick={() => {
+                const input = document.getElementById('file-upload-input');
+                if (input) input.click();
+              }}
+              className={`border-2 border-dashed rounded-xl p-6 transition-all duration-200 text-center space-y-3 cursor-pointer ${isDragging
+                  ? 'border-[#B85C38] bg-[#B85C38]/10 scale-[1.01] shadow-md ring-4 ring-[#B85C38]/20'
+                  : hasActiveUploadedFile
+                    ? 'border-[#B85C38] bg-[#F6F1E7]'
+                    : 'border-[#CBD5E1] hover:border-[#B85C38] bg-[#F6F1E7]/60'
                 }`}
             >
-              <Upload className="w-6 h-6" />
-            </div>
+              <div
+                className={`w-12 h-12 rounded-xl flex items-center justify-center mx-auto transition-all duration-200 ${isDragging
+                    ? 'bg-[#B85C38] text-white scale-110'
+                    : 'bg-[#B85C38]/10 text-[#B85C38] border border-[#B85C38]/20'
+                  }`}
+              >
+                <Upload className="w-6 h-6" />
+              </div>
 
-            <div>
-              {isDragging ? (
-                <p className="text-sm font-bold text-[#B85C38] animate-pulse">
-                  {t('capture.drop_prompt')}
-                </p>
-              ) : uploadedFile ? (
-                <div className="space-y-1">
-                  <div className="inline-flex items-center space-x-2 bg-[#FBF8F1] px-3 py-1.5 rounded-lg border border-[#E7E1D3] shadow-xs max-w-full">
-                    <FileText className="w-4 h-4 text-[#B85C38] shrink-0" />
-                    <span className="text-xs font-bold text-[#1E1B17] truncate max-w-[200px] sm:max-w-[300px]">
-                      {uploadedFile.name}
-                    </span>
-                    <span className="text-[10px] text-[#6E6659] font-mono shrink-0">
-                      ({formatFileSize(uploadedFile.size)})
-                    </span>
-                    <button
-                      type="button"
-                      onClick={handleClearFile}
-                      className="p-0.5 hover:bg-[#E7E1D3] rounded text-[#6E6659] hover:text-[#1E1B17] transition-colors shrink-0"
-                      title={t('capture.remove_file')}
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
+              <div>
+                {isDragging ? (
+                  <p className="text-sm font-bold text-[#B85C38] animate-pulse">
+                    {t('capture.drop_prompt')}
+                  </p>
+                ) : hasActiveUploadedFile ? (
+                  <div className="space-y-1">
+                    <div className="inline-flex items-center space-x-2 bg-[#FBF8F1] px-3 py-1.5 rounded-lg border border-[#E7E1D3] shadow-xs max-w-full">
+                      <FileText className="w-4 h-4 text-[#B85C38] shrink-0" />
+                      <span className="text-xs font-bold text-[#1E1B17] truncate max-w-[200px] sm:max-w-[300px]">
+                        {displayFileName}
+                      </span>
+                      {displayFileSize && (
+                        <span className="text-[10px] text-[#6E6659] font-mono shrink-0">
+                          ({displayFileSize})
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleClearFile}
+                        className="p-0.5 hover:bg-[#E7E1D3] rounded text-[#6E6659] hover:text-[#1E1B17] transition-colors shrink-0"
+                        title={t('capture.remove_file')}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-[#6E6659] mt-1">
+                      {getFileStatusMessage()}
+                    </p>
                   </div>
-                  <p className="text-[11px] text-[#6E6659] mt-1">
-                    {t('capture.file_ready')}
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <p className="text-xs font-semibold text-[#1E1B17]">
-                    {t('capture.upload_heading')}
-                  </p>
-                  <p className="text-[11px] text-[#6E6659] mt-1">
-                    {t('capture.upload_subtext')}
-                  </p>
-                </>
-              )}
-            </div>
+                ) : (
+                  <>
+                    <p className="text-xs font-semibold text-[#1E1B17]">
+                      {t('capture.upload_heading')}
+                    </p>
+                    <p className="text-[11px] text-[#6E6659] mt-1">
+                      {t('capture.upload_subtext')}
+                    </p>
+                  </>
+                )}
+              </div>
 
-            <input
-              type="file"
-              accept=".pdf,.docx,.txt,.png,.jpg,.jpeg"
-              onChange={handleFileChange}
-              className="hidden"
-              id="file-upload-input"
-              name="fileUpload"
-            />
+              <input
+                type="file"
+                accept=".pdf,.docx,.txt,.png,.jpg,.jpeg"
+                onChange={handleFileChange}
+                className="hidden"
+                id="file-upload-input"
+                name="fileUpload"
+              />
 
-            {!uploadedFile && !isDragging && (
-              <label
-                htmlFor="file-upload-input"
-                onClick={(e) => e.stopPropagation()}
+              {!hasActiveUploadedFile && !isDragging && (
+                <label
+                  htmlFor="file-upload-input"
+                  onClick={(e) => e.stopPropagation()}
                 className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 bg-[#FBF8F1] hover:bg-[#E7E1D3]/50 text-[#1E1B17] text-xs font-medium rounded-lg cursor-pointer border border-[#E7E1D3] transition-colors shadow-xs"
               >
                 <FileText className="w-3.5 h-3.5 text-[#B85C38]" />
@@ -574,55 +744,81 @@ The Lessee agrees to defend, indemnify, and hold harmless the Lessor against all
             </div>
           )}
 
-          <div>
-            <label htmlFor="manual-text-input" className="block text-xs font-medium text-[#6E6659] mb-1">
-              {t('capture.paste_label')}
-            </label>
-            <AutoResizeTextarea
-              id="manual-text-input"
-              name="manualText"
-              rows={3}
-              value={manualText}
-              onChange={(e) => setManualText(e.target.value)}
-              placeholder={t('capture.paste_placeholder')}
-              className="w-full bg-[#F6F1E7] border border-[#E7E1D3] rounded-lg p-3 text-xs text-[#1E1B17] focus:outline-none focus:border-[#B85C38]"
-            />
-          </div>
+            <div>
+              <label htmlFor="manual-text-input" className="block text-xs font-medium text-[#6E6659] mb-1">
+                {t('capture.paste_label')}
+              </label>
+              <AutoResizeTextarea
+                id="manual-text-input"
+                name="manualText"
+                rows={3}
+                value={manualText}
+                onChange={(e) => setManualText(e.target.value)}
+                placeholder={t('capture.paste_placeholder')}
+                className={`w-full bg-[#F6F1E7] border rounded-lg p-3 text-xs text-[#1E1B17] focus:outline-none focus:border-[#B85C38] ${
+                  isWordLimitExceeded(manualText) ? 'border-[#FCA5A5] bg-[#FFF5F5]' : 'border-[#E7E1D3]'
+                }`}
+              />
+              {manualText.trim() && !hasActiveUploadedFile && !isWordLimitExceeded(manualText) && (
+                <p className="text-[11px] text-[#6E6659] mt-1">
+                  {getPastedTextStatusMessage()}
+                </p>
+              )}
+              {isWordLimitExceeded(manualText) && (
+                <div className="mt-2 p-3 rounded-xl bg-[#FFF5F5] border border-[#FCA5A5] text-[#991B1B] text-xs font-semibold flex items-start space-x-2 shadow-xs animate-fade-in-up">
+                  <AlertCircle className="w-4 h-4 text-[#991B1B] shrink-0 mt-0.5" />
+                  <span className="flex-1 leading-relaxed">
+                    {language === 'hi' ? MAX_PASTED_WORDS_ERROR_MSG_HI : MAX_PASTED_WORDS_ERROR_MSG}
+                  </span>
+                </div>
+              )}
+            </div>
 
-          {/* Single Dominant CTA Accent Rule */}
-          {(() => {
-            const isAnalyzeDisabled = isLoading || (!uploadedFile && !manualText.trim());
+            {/* Single Dominant CTA Accent Rule */}
+            {(() => {
+              const isWordExceeded = isWordLimitExceeded(manualText);
+              const isPdfExceeded =
+                extractedFileText === MAX_PDF_PAGES_ERROR_MSG ||
+                extractedFileText === MAX_PDF_PAGES_ERROR_MSG_HI ||
+                extractedFileText.includes('30 pages') ||
+                extractedFileText.includes('30 पृष्ठों');
+              const isAnalyzeDisabled =
+                isLoading ||
+                (!hasActiveUploadedFile && !manualText.trim()) ||
+                isWordExceeded ||
+                isPdfExceeded;
 
-            if (isLoading) {
+              if (isLoading) {
+                return (
+                  <button
+                    disabled
+                    className="w-full py-2.5 font-bold text-xs rounded-lg flex items-center justify-center space-x-2 bg-[#D9A391] text-[#FBF8F1] cursor-not-allowed border border-[#C58E7C]/40 shadow-none"
+                  >
+                    <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                    <span>{t('capture.btn_analyzing')}</span>
+                  </button>
+                );
+              }
+
               return (
                 <button
-                  disabled
-                  className="w-full py-2.5 font-bold text-xs rounded-lg flex items-center justify-center space-x-2 bg-[#D9A391] text-[#FBF8F1] cursor-not-allowed border border-[#C58E7C]/40 shadow-none"
+                  onClick={handleSubmitFile}
+                  disabled={isAnalyzeDisabled}
+                  aria-disabled={isAnalyzeDisabled}
+                  className={`w-full py-2.5 font-bold text-xs rounded-lg flex items-center justify-center space-x-2 transition-all duration-200 ease-out ${
+                    isAnalyzeDisabled
+                      ? 'bg-[#D9A391] text-[#FBF8F1]/75 cursor-not-allowed border border-[#C58E7C]/40 shadow-none'
+                      : 'bg-[#B85C38] hover:bg-[#9C4B2B] text-white cursor-pointer shadow-xs border border-[#B85C38] active:scale-[0.99]'
+                  }`}
                 >
-                  <RefreshCw className="w-4 h-4 animate-spin text-white" />
-                  <span>{t('capture.btn_analyzing')}</span>
+                  <FileText className="w-4 h-4" />
+                  <span>{t('capture.btn_analyze')}</span>
                 </button>
               );
-            }
-
-            return (
-              <button
-                onClick={handleSubmitFile}
-                disabled={isAnalyzeDisabled}
-                aria-disabled={isAnalyzeDisabled}
-                className={`w-full py-2.5 font-bold text-xs rounded-lg flex items-center justify-center space-x-2 transition-all duration-200 ease-out ${
-                  isAnalyzeDisabled
-                    ? 'bg-[#D9A391] text-[#FBF8F1]/75 cursor-not-allowed border border-[#C58E7C]/40 shadow-none'
-                    : 'bg-[#B85C38] hover:bg-[#9C4B2B] text-white cursor-pointer shadow-xs border border-[#B85C38] active:scale-[0.99]'
-                }`}
-              >
-                <FileText className="w-4 h-4" />
-                <span>{t('capture.btn_analyze')}</span>
-              </button>
-            );
-          })()}
-        </div>
-      )}
+            })()}
+          </div>
+        );
+      })()}
 
       {/* Tab 2: Camera Live Scanner */}
       {isMobile && activeTab === 'camera' && (
@@ -755,13 +951,29 @@ The Lessee agrees to defend, indemnify, and hold harmless the Lessor against all
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <button
+              type="button"
               onClick={() => handleLoadSample('rental')}
               disabled={isLoading}
-              className="p-4 bg-[#F6F1E7] hover:bg-[#E7E1D3]/50 border border-[#E7E1D3] rounded-xl text-left transition-all duration-200 space-y-2 group hover:-translate-y-0.5 hover:shadow-xs cursor-pointer"
+              className={`p-4 rounded-xl text-left transition-all duration-200 space-y-2 group cursor-pointer relative ${
+                selectedSample === 'rental'
+                  ? 'border-2 border-[#B85C38] bg-[#FBF8F1] ring-4 ring-[#B85C38]/15 shadow-md'
+                  : 'border border-[#E7E1D3] bg-[#F6F1E7] hover:bg-[#E7E1D3]/50 hover:-translate-y-0.5 hover:shadow-xs'
+              }`}
             >
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-bold uppercase text-[#B85C38]">{t('capture.sample_rental_badge')}</span>
-                <span className="text-[10px] bg-[#FBF8F1] text-[#6E6659] px-2 py-0.5 rounded border border-[#E7E1D3]">{t('capture.city_bengaluru')}</span>
+                {selectedSample === 'rental' && !isLoading ? (
+                  <span
+                    onClick={(e) => handleClearSample(e)}
+                    className="px-2 py-0.5 text-[10px] font-bold text-[#991B1B] bg-[#FFF5F5] hover:bg-[#FCA5A5]/40 border border-[#FCA5A5] rounded-md transition-all flex items-center space-x-1 cursor-pointer"
+                    title={language === 'hi' ? 'नमूना विश्लेषण हटाएं' : 'Remove sample analysis'}
+                  >
+                    <X className="w-3 h-3" />
+                    <span>{language === 'hi' ? 'नमूना हटाएं' : 'Remove Sample'}</span>
+                  </span>
+                ) : (
+                  <span className="text-[10px] bg-[#FBF8F1] text-[#6E6659] px-2 py-0.5 rounded border border-[#E7E1D3]">{t('capture.city_bengaluru')}</span>
+                )}
               </div>
               <h3 className="text-xs font-bold text-[#1E1B17] group-hover:text-[#B85C38] flex items-center space-x-1.5 transition-colors">
                 <Building className="w-3.5 h-3.5 text-[#B85C38]" />
@@ -776,13 +988,29 @@ The Lessee agrees to defend, indemnify, and hold harmless the Lessor against all
             </button>
 
             <button
+              type="button"
               onClick={() => handleLoadSample('employment')}
               disabled={isLoading}
-              className="p-4 bg-[#F6F1E7] hover:bg-[#E7E1D3]/50 border border-[#E7E1D3] rounded-xl text-left transition-all duration-200 space-y-2 group hover:-translate-y-0.5 hover:shadow-xs cursor-pointer"
+              className={`p-4 rounded-xl text-left transition-all duration-200 space-y-2 group cursor-pointer relative ${
+                selectedSample === 'employment'
+                  ? 'border-2 border-[#B85C38] bg-[#FBF8F1] ring-4 ring-[#B85C38]/15 shadow-md'
+                  : 'border border-[#E7E1D3] bg-[#F6F1E7] hover:bg-[#E7E1D3]/50 hover:-translate-y-0.5 hover:shadow-xs'
+              }`}
             >
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-bold uppercase text-[#B85C38]">{t('capture.sample_emp_badge')}</span>
-                <span className="text-[10px] bg-[#FBF8F1] text-[#6E6659] px-2 py-0.5 rounded border border-[#E7E1D3]">{t('capture.city_gurugram')}</span>
+                {selectedSample === 'employment' && !isLoading ? (
+                  <span
+                    onClick={(e) => handleClearSample(e)}
+                    className="px-2 py-0.5 text-[10px] font-bold text-[#991B1B] bg-[#FFF5F5] hover:bg-[#FCA5A5]/40 border border-[#FCA5A5] rounded-md transition-all flex items-center space-x-1 cursor-pointer"
+                    title={language === 'hi' ? 'नमूना विश्लेषण हटाएं' : 'Remove sample analysis'}
+                  >
+                    <X className="w-3 h-3" />
+                    <span>{language === 'hi' ? 'नमूना हटाएं' : 'Remove Sample'}</span>
+                  </span>
+                ) : (
+                  <span className="text-[10px] bg-[#FBF8F1] text-[#6E6659] px-2 py-0.5 rounded border border-[#E7E1D3]">{t('capture.city_gurugram')}</span>
+                )}
               </div>
               <h3 className="text-xs font-bold text-[#1E1B17] group-hover:text-[#B85C38] flex items-center space-x-1.5 transition-colors">
                 <Briefcase className="w-3.5 h-3.5 text-[#B85C38]" />

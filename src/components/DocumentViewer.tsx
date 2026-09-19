@@ -79,20 +79,18 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                 clauseRefs.current[c.id] = el;
               }}
               onClick={() => onClauseSelect?.(c.id, idx)}
-              className={`p-3.5 rounded-xl border-2 transition-all duration-200 cursor-pointer bg-[#FBF8F1] my-0.5 ${
-                isHighlighted
+              className={`p-3.5 rounded-xl border-2 transition-all duration-200 cursor-pointer bg-[#FBF8F1] my-0.5 ${isHighlighted
                   ? 'border-[#B85C38] ring-1 ring-[#B85C38]/40 shadow-md scale-[1.002]'
                   : 'border-[#E7E1D3] hover:border-[#B85C38]/40 hover:shadow-xs'
-              }`}
+                }`}
             >
               <div className="flex items-center justify-between mb-2 font-sans font-extrabold text-xs">
                 <div className="flex items-center space-x-2 min-w-0">
                   <span
-                    className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-black shrink-0 ${
-                      isHighlighted
+                    className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-black shrink-0 ${isHighlighted
                         ? 'bg-[#B85C38] text-white'
                         : 'bg-[#E7E1D3] text-[#1E1B17]'
-                    }`}
+                      }`}
                   >
                     #{idx + 1}
                   </span>

@@ -38,6 +38,36 @@ function calculateCosineSimilarity(textA: string, textB: string): number {
   return dotProduct / (Math.sqrt(magA) * Math.sqrt(magB));
 }
 
+function getNormalizedCategory(clause: SimplifiedClause, index: number): ClauseType {
+  const typeStr = (clause.clause_type || '').toLowerCase();
+  const titleStr = (clause.title || '').toLowerCase();
+
+  const isPreambleOrRecital =
+    index === 0 ||
+    typeStr.includes('preamble') ||
+    typeStr.includes('parties') ||
+    typeStr.includes('recital') ||
+    titleStr.includes('preamble') ||
+    titleStr.includes('recital') ||
+    titleStr.includes('parties') ||
+    titleStr.includes('this agreement') ||
+    titleStr.includes('agreement') ||
+    titleStr.includes('terms of service');
+
+  if (
+    isPreambleOrRecital &&
+    !typeStr.includes('term & termination') &&
+    !typeStr.includes('indemnity') &&
+    !typeStr.includes('non-compete') &&
+    !typeStr.includes('penalty') &&
+    !typeStr.includes('payment')
+  ) {
+    return 'parties & recitals' as ClauseType;
+  }
+
+  return clause.clause_type;
+}
+
 export function alignClauses(
   clausesA: SimplifiedClause[],
   clausesB: SimplifiedClause[]
@@ -51,72 +81,133 @@ export function alignClauses(
   const usedBIds = new Set<string>();
   const usedAIds = new Set<string>();
 
-  // Group clauses by type
+  // Group clauses by effective category
   const typeMapA = new Map<ClauseType, SimplifiedClause[]>();
   const typeMapB = new Map<ClauseType, SimplifiedClause[]>();
 
-  clausesA.forEach((c) => {
-    const list = typeMapA.get(c.clause_type) || [];
+  clausesA.forEach((c, idx) => {
+    const cat = getNormalizedCategory(c, idx);
+    const list = typeMapA.get(cat) || [];
     list.push(c);
-    typeMapA.set(c.clause_type, list);
+    typeMapA.set(cat, list);
   });
 
-  clausesB.forEach((c) => {
-    const list = typeMapB.get(c.clause_type) || [];
+  clausesB.forEach((c, idx) => {
+    const cat = getNormalizedCategory(c, idx);
+    const list = typeMapB.get(cat) || [];
     list.push(c);
-    typeMapB.set(c.clause_type, list);
+    typeMapB.set(cat, list);
   });
 
-  // For each clause type present in A
-  typeMapA.forEach((aList, type) => {
-    const bList = typeMapB.get(type) || [];
+  // Collect all unique clause categories across both documents
+  const allCategories = new Set<ClauseType>([...Array.from(typeMapA.keys()), ...Array.from(typeMapB.keys())]);
 
-    aList.forEach((clauseA) => {
-      let bestMatch: SimplifiedClause | null = null;
-      let bestSim = 0;
+  allCategories.forEach((cat) => {
+    const aList = typeMapA.get(cat) || [];
+    const bList = typeMapB.get(cat) || [];
 
-      bList.forEach((clauseB) => {
-        if (usedBIds.has(clauseB.id)) return;
-        const sim = calculateCosineSimilarity(
-          clauseA.original_text + ' ' + clauseA.simple_explanation,
-          clauseB.original_text + ' ' + clauseB.simple_explanation
-        );
-        if (sim > bestSim) {
-          bestSim = sim;
-          bestMatch = clauseB;
-        }
+    if (aList.length > 0 && bList.length > 0) {
+      // Build candidate matches within the same category
+      const candidatePairs: Array<{
+        clauseA: SimplifiedClause;
+        clauseB: SimplifiedClause;
+        similarity: number;
+      }> = [];
+
+      aList.forEach((cA) => {
+        bList.forEach((cB) => {
+          const sim = calculateCosineSimilarity(
+            cA.original_text + ' ' + (cA.simple_explanation || '') + ' ' + cA.title,
+            cB.original_text + ' ' + (cB.simple_explanation || '') + ' ' + cB.title
+          );
+          candidatePairs.push({ clauseA: cA, clauseB: cB, similarity: sim });
+        });
       });
 
-      // If good match found within same clause_type OR if it's the only one of this type
-      if (bestMatch && (bestSim >= 0.25 || (aList.length === 1 && bList.length === 1))) {
-        const match = bestMatch as SimplifiedClause;
-        usedAIds.add(clauseA.id);
-        usedBIds.add(match.id);
+      // Sort candidate pairs by similarity descending so highest similarity matches first
+      candidatePairs.sort((x, y) => y.similarity - x.similarity);
 
-        const pair: AlignedClausePair = {
-          id: `pair_${clauseA.id}_${match.id}`,
-          clause_type: type,
-          doc_a_clause: clauseA,
-          doc_b_clause: match,
-          status: 'matched',
-          similarity_score: Math.round(bestSim * 100) / 100,
-          risk_delta:
-            clauseA.risk_level === match.risk_level
-              ? clauseA.risk_level === 'high'
-                ? 'both_risky'
-                : 'equal'
-              : clauseA.risk_level === 'low'
-              ? 'a_safer'
-              : match.risk_level === 'low'
-              ? 'b_safer'
-              : 'equal',
-        };
-        alignedPairs.push(pair);
+      candidatePairs.forEach(({ clauseA, clauseB, similarity }) => {
+        if (usedAIds.has(clauseA.id) || usedBIds.has(clauseB.id)) return;
+
+        // Allow match for same category if similarity >= 0.05 or if both are single/preamble entries
+        if (similarity >= 0.05 || cat === 'parties & recitals' || (aList.length === 1 && bList.length === 1)) {
+          usedAIds.add(clauseA.id);
+          usedBIds.add(clauseB.id);
+
+          alignedPairs.push({
+            id: `pair_${clauseA.id}_${clauseB.id}`,
+            clause_type: cat,
+            doc_a_clause: clauseA,
+            doc_b_clause: clauseB,
+            status: 'matched',
+            similarity_score: Math.round(similarity * 100) / 100,
+            risk_delta:
+              clauseA.risk_level === clauseB.risk_level
+                ? clauseA.risk_level === 'high'
+                  ? 'both_risky'
+                  : 'equal'
+                : clauseA.risk_level === 'low'
+                ? 'a_safer'
+                : clauseB.risk_level === 'low'
+                ? 'b_safer'
+                : 'equal',
+          });
+        }
+      });
+    }
+  });
+
+  // Cross-category semantic backup pass for remaining unmatched clauses if similarity is high (>= 0.35)
+  const remainingA = clausesA.filter((cA) => !usedAIds.has(cA.id));
+  const remainingB = clausesB.filter((cB) => !usedBIds.has(cB.id));
+
+  const crossCandidates: Array<{
+    clauseA: SimplifiedClause;
+    clauseB: SimplifiedClause;
+    similarity: number;
+  }> = [];
+
+  remainingA.forEach((cA) => {
+    remainingB.forEach((cB) => {
+      const sim = calculateCosineSimilarity(
+        cA.original_text + ' ' + (cA.simple_explanation || '') + ' ' + cA.title,
+        cB.original_text + ' ' + (cB.simple_explanation || '') + ' ' + cB.title
+      );
+      if (sim >= 0.35) {
+        crossCandidates.push({ clauseA: cA, clauseB: cB, similarity: sim });
       }
     });
   });
 
-  // Unmatched in A -> a_only
+  crossCandidates.sort((x, y) => y.similarity - x.similarity);
+
+  crossCandidates.forEach(({ clauseA, clauseB, similarity }) => {
+    if (usedAIds.has(clauseA.id) || usedBIds.has(clauseB.id)) return;
+    usedAIds.add(clauseA.id);
+    usedBIds.add(clauseB.id);
+
+    alignedPairs.push({
+      id: `pair_${clauseA.id}_${clauseB.id}`,
+      clause_type: clauseA.clause_type || clauseB.clause_type,
+      doc_a_clause: clauseA,
+      doc_b_clause: clauseB,
+      status: 'matched',
+      similarity_score: Math.round(similarity * 100) / 100,
+      risk_delta:
+        clauseA.risk_level === clauseB.risk_level
+          ? clauseA.risk_level === 'high'
+            ? 'both_risky'
+            : 'equal'
+          : clauseA.risk_level === 'low'
+          ? 'a_safer'
+          : clauseB.risk_level === 'low'
+          ? 'b_safer'
+          : 'equal',
+    });
+  });
+
+  // Unmatched in A -> a_only with cA's true clause_type
   const aOnlyClauses = clausesA.filter((cA) => !usedAIds.has(cA.id));
   aOnlyClauses.forEach((cA) => {
     alignedPairs.push({
@@ -129,7 +220,7 @@ export function alignClauses(
     });
   });
 
-  // Unmatched in B -> b_only
+  // Unmatched in B -> b_only with cB's true clause_type
   const bOnlyClauses = clausesB.filter((cB) => !usedBIds.has(cB.id));
   bOnlyClauses.forEach((cB) => {
     alignedPairs.push({
@@ -142,7 +233,6 @@ export function alignClauses(
     });
   });
 
-  // Pairs needing deeper LLM diff synthesis
   const pairsNeedingDiff = alignedPairs.filter((p) => p.status === 'matched');
 
   return {

@@ -69,7 +69,7 @@ export class ApiClient {
     try {
       const saved = localStorage.getItem('legallens_language');
       if (saved === 'hi' || saved === 'en') return saved;
-    } catch {}
+    } catch { }
     return 'en';
   }
 

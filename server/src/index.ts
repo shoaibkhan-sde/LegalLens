@@ -21,6 +21,7 @@ import {
   chunkDocumentTextIntoClausesAsync,
   applyRiskTaggingAndGrounding,
   applyRiskTaggingAndGroundingAsync,
+  verifyModelAvailabilityHealthCheck,
 } from './services/astraBackend';
 
 dotenv.config({ path: path.join(process.cwd(), 'server/.env') });
@@ -347,4 +348,5 @@ app.post('/api/chat', async (req: Request, res: Response) => {
 
 app.listen(PORT, () => {
   console.log(`⚡ LegalLens Backend running on http://localhost:${PORT}`);
+  verifyModelAvailabilityHealthCheck().catch((e) => console.warn('Startup health check warning:', e));
 });
