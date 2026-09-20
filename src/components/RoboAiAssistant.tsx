@@ -41,6 +41,7 @@ interface RoboAiAssistantProps {
   onVerifyClause?: (clauseId: string) => void;
   isOpen?: boolean;
   onToggleOpen?: (open: boolean) => void;
+  containerHeight?: number;
 }
 
 export const RoboAiAssistant: React.FC<RoboAiAssistantProps> = ({
@@ -50,6 +51,7 @@ export const RoboAiAssistant: React.FC<RoboAiAssistantProps> = ({
   onVerifyClause,
   isOpen: externalIsOpen,
   onToggleOpen,
+  containerHeight,
 }) => {
   const { language, t } = useLanguage();
 
@@ -489,15 +491,21 @@ export const RoboAiAssistant: React.FC<RoboAiAssistantProps> = ({
     );
   }
 
+  const heightStyle: React.CSSProperties =
+    containerHeight && typeof window !== 'undefined' && window.innerWidth >= 1024
+      ? { height: `${containerHeight}px` }
+      : {};
+
   const heightClass =
     sectionId === 'analyze'
-      ? 'h-full min-h-[460px] sm:min-h-[500px]'
+      ? 'h-[520px] sm:h-[580px] lg:h-[600px] max-h-[calc(100vh-7rem)]'
       : 'h-[520px] sm:h-[560px] lg:h-[600px] max-h-[calc(100vh-7rem)]';
 
   // If open: Render Embedded Chat Screen with Fixed Height, History & Clean Controls
   return (
     <div
       id="robo-assistant-container"
+      style={heightStyle}
       className={`bg-[#FBF8F1] border-2 border-[#E7E1D3] rounded-2xl shadow-md overflow-hidden flex flex-col ${heightClass} animate-chat-popin relative scroll-mt-6`}
     >
       {/* Header Bar */}

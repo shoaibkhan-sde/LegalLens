@@ -310,6 +310,26 @@ function AppContent() {
 
   const activeRequestIdRef = useRef<number>(0);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const analyzeLeftColumnRef = useRef<HTMLDivElement | null>(null);
+  const [analyzeLeftColumnHeight, setAnalyzeLeftColumnHeight] = useState<number | undefined>(undefined);
+
+  useEffect(() => {
+    if (!analyzeLeftColumnRef.current || typeof window === 'undefined') return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.target === analyzeLeftColumnRef.current) {
+          const height = Math.round(entry.contentRect.height);
+          if (height > 0) {
+            setAnalyzeLeftColumnHeight(height);
+          }
+        }
+      }
+    });
+
+    observer.observe(analyzeLeftColumnRef.current);
+    return () => observer.disconnect();
+  }, [isChatOpen, activeTab, captureTab, activeInputContext?.uploadedFileName, activeInputContext?.pastedText]);
 
   const handleCancelAnalysis = () => {
     // 1. Invalidate current request token so late-arriving SSE callbacks are discarded
@@ -537,9 +557,9 @@ function AppContent() {
             )}
 
             {/* Top Section: Dynamic Grid (100% width when chat closed, 50%/50% equal area split when chat open) */}
-            <div className={`grid grid-cols-1 lg:grid-cols-12 gap-6 transition-all duration-300 ${isChatOpen ? 'items-stretch' : 'items-start'}`}>
+            <div className={`grid grid-cols-1 lg:grid-cols-12 gap-6 transition-all duration-300 items-start`}>
               {/* Document Capture Area */}
-              <div className={`${isChatOpen ? 'lg:col-span-6' : 'lg:col-span-12'} transition-all duration-300`}>
+              <div ref={analyzeLeftColumnRef} className={`${isChatOpen ? 'lg:col-span-6' : 'lg:col-span-12'} transition-all duration-300`}>
                 <DocumentCapture
                   onAnalyzeText={handleAnalyzeText}
                   isLoading={isLoading}
@@ -578,7 +598,7 @@ function AppContent() {
               {isChatOpen && (
                 <div
                   id="legal-chat-container"
-                  className="lg:col-span-6 transition-all duration-300 animate-fade-in-up relative lg:sticky lg:top-24 scroll-mt-6 h-full flex flex-col"
+                  className="lg:col-span-6 transition-all duration-300 animate-fade-in-up relative lg:sticky lg:top-24 scroll-mt-6"
                 >
                   <RoboAiAssistant
                     sectionId="analyze"
@@ -587,6 +607,7 @@ function AppContent() {
                     onVerifyClause={handleVerifyInDocument}
                     isOpen={isChatOpen}
                     onToggleOpen={handleToggleChatOpen}
+                    containerHeight={analyzeLeftColumnHeight}
                   />
                 </div>
               )}

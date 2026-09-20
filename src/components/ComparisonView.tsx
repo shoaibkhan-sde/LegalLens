@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   GitCompare,
   FileText,
@@ -41,6 +41,26 @@ interface ComparisonViewProps { }
 
 export const ComparisonView: React.FC<ComparisonViewProps> = () => {
   const { language, t } = useLanguage();
+  const compareLeftColumnRef = useRef<HTMLDivElement | null>(null);
+  const [compareLeftColumnHeight, setCompareLeftColumnHeight] = useState<number | undefined>(undefined);
+
+  useEffect(() => {
+    if (!compareLeftColumnRef.current || typeof window === 'undefined') return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.target === compareLeftColumnRef.current) {
+          const height = Math.round(entry.contentRect.height);
+          if (height > 0) {
+            setCompareLeftColumnHeight(height);
+          }
+        }
+      }
+    });
+
+    observer.observe(compareLeftColumnRef.current);
+    return () => observer.disconnect();
+  }, []);
 
   // Document A State
   const [docAMode, setDocAModeState] = useState<'paste' | 'upload'>(() => {
@@ -542,7 +562,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = () => {
       {/* Top Section: Dynamic Grid (100% width when chat closed, 50%/50% equal area split when chat open) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 transition-all duration-300 items-start">
         {/* Comparison Main Setup & Results Column */}
-        <div className={`${isChatOpen ? 'lg:col-span-6' : 'lg:col-span-12'} transition-all duration-300 space-y-6`}>
+        <div ref={compareLeftColumnRef} className={`${isChatOpen ? 'lg:col-span-6' : 'lg:col-span-12'} transition-all duration-300 space-y-6`}>
           {/* Error Message Banner */}
           {errorMessage && (
             <div
@@ -1102,6 +1122,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = () => {
               inputContext={comparisonInputContext}
               isOpen={isChatOpen}
               onToggleOpen={handleToggleChatOpen}
+              containerHeight={compareLeftColumnHeight}
             />
           </div>
         )}
