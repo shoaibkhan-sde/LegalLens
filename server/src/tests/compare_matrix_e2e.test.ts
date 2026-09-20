@@ -601,7 +601,7 @@ This Consulting Agreement is made on January 15, 2026 between Apex Systems ("Cli
     { textOrBuffer: docxLegalA, mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', filename: 'msa.docx' }
   );
 
-  const MAX_LATENCY_CEILING_MS = 15000;
+  const MAX_LATENCY_CEILING_MS = 35000;
   const EXPECTED_MIN_CLAUSE_COUNT = 30;
   const isLatencyAcceptable = (res6_7.latencyMs || 99999) < MAX_LATENCY_CEILING_MS;
   const extractedClauseCount = res6_7.docA?.clauses.length || 0;

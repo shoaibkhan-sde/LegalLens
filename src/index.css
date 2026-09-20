@@ -356,3 +356,19 @@ label,
 .animate-mic-shake {
   animation: micShakeAlert 0.45s ease-in-out 2;
 }
+
+/* Scoped Print Fallback Rules */
+@media print {
+  body {
+    background-color: #ffffff !important;
+    color: #1e1b17 !important;
+  }
+  nav,
+  header,
+  footer,
+  .no-print,
+  button,
+  [role="button"] {
+    display: none !important;
+  }
+}

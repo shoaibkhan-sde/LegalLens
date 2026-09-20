@@ -687,13 +687,26 @@ export async function extractAndCleanDocumentTextAsync(
     if (mimeLower.includes('text') || mimeLower.includes('plain') || nameLower.endsWith('.txt') || nameLower.endsWith('.md') || nameLower.endsWith('.json') || nameLower.endsWith('.csv')) {
       extractedText = fileBuffer.toString('utf-8').trim();
     } else if (isPdf) {
-      // 1. Fast Page Count Cap Check (Max 30 pages)
+      // 1. Fast Page Count Cap & Password Protection Check (Max 30 pages)
       let pageCount = 0;
+      const rawPdfHeader = fileBuffer.toString('utf-8', 0, Math.min(fileBuffer.length, 10000));
+      if (rawPdfHeader.includes('/Encrypt')) {
+        console.error(`❌ [ENCRYPTED PDF DETECTED] File "${originalName}" is password-protected or encrypted.`);
+        throw new Error("Password-protected PDF detected — please remove encryption before uploading.");
+      }
+
       try {
         const pdfDoc = await PDFDocument.load(fileBuffer, { ignoreEncryption: true });
         pageCount = pdfDoc.getPageCount();
         console.log(`📄 [PDF PAGE COUNT CHECK] Document page count: ${pageCount} (limit: ${MAX_PDF_PAGES})`);
-      } catch (pdfLoadErr) {
+        if ((pdfDoc as any).isEncrypted) {
+          console.error(`❌ [ENCRYPTED PDF DETECTED] File "${originalName}" is password-protected or encrypted.`);
+          throw new Error("Password-protected PDF detected — please remove encryption before uploading.");
+        }
+      } catch (pdfLoadErr: any) {
+        if (pdfLoadErr?.message?.includes('Password-protected') || pdfLoadErr?.message?.includes('encrypted')) {
+          throw pdfLoadErr;
+        }
         console.warn('pdf-lib load failed for page count check:', pdfLoadErr);
       }
 
@@ -3035,8 +3048,13 @@ export function validateAndEnforceGroundedSynthesis(
     ? result.overall_risk_score
     : calculateDocumentOverallRiskScore(syncedClauses);
 
+  const safeDocTitle = (result.document_title && typeof result.document_title === 'string' && result.document_title.trim() !== '' && result.document_title.toLowerCase() !== 'undefined')
+    ? result.document_title.trim()
+    : extractDocumentTitle(syncedClauses.map((c) => c.original_text).join('\n'), docCategory as DocumentCategory);
+
   return {
     ...result,
+    document_title: safeDocTitle,
     overall_risk_score: overallRiskScore,
     clauses: syncedClauses,
     checklist: {

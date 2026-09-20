@@ -664,8 +664,8 @@ export const ComparisonView: React.FC<ComparisonViewProps> = () => {
                   <div className="text-[10px] text-[#065F46] bg-[#D1FAE5] px-2 py-0.5 rounded border border-[#6EE7B7] flex items-center justify-between">
                     <span className="font-semibold truncate">
                       {docAMode === 'upload' && (docAFile || docAFileName)
-                        ? `📄 Doc A: "${docAFile?.name || docAFileName}" (${docAFile ? formatFileSize(docAFile.size) + ' • ' : ''}${docAExtractedText.length} chars)`
-                        : `📝 Doc A: Pasted Text (${activeTextA.length} chars)`}
+                        ? `📄 Doc A: "${docAFile?.name || docAFileName}" (${docAFile ? formatFileSize(docAFile.size) + ' • ' : ''}${countWords(docAExtractedText)} ${language === 'hi' ? 'शब्द' : countWords(docAExtractedText) === 1 ? 'word' : 'words'})`
+                        : `📝 Doc A: Pasted Text (${countWords(activeTextA)} ${language === 'hi' ? 'शब्द' : countWords(activeTextA) === 1 ? 'word' : 'words'})`}
                     </span>
                     {docAMode === 'upload' && (docAFile || docAFileName) && (
                       <button
@@ -841,8 +841,8 @@ export const ComparisonView: React.FC<ComparisonViewProps> = () => {
                   <div className="text-[10px] text-[#065F46] bg-[#D1FAE5] px-2 py-0.5 rounded border border-[#6EE7B7] flex items-center justify-between">
                     <span className="font-semibold truncate">
                       {docBMode === 'upload' && (docBFile || docBFileName)
-                        ? `📄 Doc B: "${docBFile?.name || docBFileName}" (${docBFile ? formatFileSize(docBFile.size) + ' • ' : ''}${docBExtractedText.length} chars)`
-                        : `📝 Doc B: Pasted Text (${activeTextB.length} chars)`}
+                        ? `📄 Doc B: "${docBFile?.name || docBFileName}" (${docBFile ? formatFileSize(docBFile.size) + ' • ' : ''}${countWords(docBExtractedText)} ${language === 'hi' ? 'शब्द' : countWords(docBExtractedText) === 1 ? 'word' : 'words'})`
+                        : `📝 Doc B: Pasted Text (${countWords(activeTextB)} ${language === 'hi' ? 'शब्द' : countWords(activeTextB) === 1 ? 'word' : 'words'})`}
                     </span>
                     {docBMode === 'upload' && (docBFile || docBFileName) && (
                       <button

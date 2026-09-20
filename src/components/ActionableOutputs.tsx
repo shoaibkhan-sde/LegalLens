@@ -18,6 +18,7 @@ import { DocumentAnalysisResult } from '../types/schemas';
 import { useLanguage } from '../context/LanguageContext';
 
 import { saveStorage, loadStorage } from '../utils/persistence';
+import { buildICalCalendarContent } from '../utils/icalExporter';
 
 interface ActionableOutputsProps {
   document: DocumentAnalysisResult;
@@ -140,32 +141,340 @@ export const ActionableOutputs: React.FC<ActionableOutputsProps> = ({ document }
   }, [flaggedIndex, flaggedViewMode, activeTab, document]);
 
   const handleExportCalendarICS = () => {
-    const events = (document?.checklist?.items || []).filter((item) => item?.due_date_or_timeframe);
-    if (events.length === 0) {
-      alert('No specific deadline dates found to export to calendar.');
+    const items = document?.checklist?.items || [];
+    const docTitle = document?.document_title || (language === 'hi' ? 'कानूनी दस्तावेज़' : 'Legal Agreement');
+
+    const { icsContent, exportCount } = buildICalCalendarContent(items, docTitle, language);
+
+    if (exportCount === 0 || !icsContent) {
+      alert(
+        language === 'hi'
+          ? 'कैलेंडर में निर्यात करने के लिए कोई विशिष्ट समय सीमा नहीं मिली।'
+          : 'No specific deadline dates or timeframes found in this checklist to export to your calendar.'
+      );
       return;
     }
-
-    let icsContent =
-      'BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//LegalLens//Legal Deadline Reminders//EN\n';
-
-    events.forEach((item) => {
-      icsContent += `BEGIN:VEVENT\nSUMMARY:LegalLens: ${item.title}\nDESCRIPTION:${item.description} - Action: ${item.action_required}\nSTATUS:CONFIRMED\nEND:VEVENT\n`;
-    });
-
-    icsContent += 'END:VCALENDAR';
 
     const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
     const link = window.document.createElement('a');
     link.href = window.URL.createObjectURL(blob);
-    link.setAttribute('download', `${(document?.document_title || 'Document').replace(/\s+/g, '_')}_Deadlines.ics`);
+    const sanitizedTitle = docTitle.replace(/[^a-zA-Z0-9_-]/g, '_');
+    link.setAttribute('download', `${sanitizedTitle}_Deadlines.ics`);
     window.document.body.appendChild(link);
     link.click();
     window.document.body.removeChild(link);
   };
 
   const handlePrintLawyerBrief = () => {
-    window.print();
+    if (!document) return;
+
+    const isHi = language === 'hi';
+    const docTitle = document.document_title || (isHi ? 'कानूनी दस्तावेज़' : 'Legal Agreement');
+    const riskScore = document.overall_risk_score ?? 0;
+    const riskBadgeClass = riskScore > 60 ? 'risk-high' : riskScore > 30 ? 'risk-medium' : 'risk-low';
+    const riskText = isHi
+      ? (riskScore > 60 ? `उच्च जोखिम (${riskScore}/100)` : riskScore > 30 ? `मध्यम जोखिम (${riskScore}/100)` : `कम जोखिम (${riskScore}/100)`)
+      : (riskScore > 60 ? `High Risk (${riskScore}/100)` : riskScore > 30 ? `Medium Risk (${riskScore}/100)` : `Low Risk (${riskScore}/100)`);
+
+    const summaryText = document.lawyer_briefing?.document_summary || document.summary_simple || '';
+    const allFlagged = document.lawyer_briefing?.flagged_issues || [];
+    const questions = document.lawyer_briefing?.questions_to_ask_lawyer || [];
+    const missingClauses = document.lawyer_briefing?.missing_protective_clauses || [];
+    const disclaimerText = document.lawyer_briefing?.disclaimer || document.disclaimer ||
+      (isHi
+        ? 'लीगललेंस एक एआई सहायता उपकरण है, कानून फर्म नहीं। यह ब्रीफिंग पैकेट केवल आपके अधिवक्ता के साथ परामर्श की तैयारी हेतु बनाया गया है।'
+        : 'LegalLens is an AI legal assistance tool, not a law firm. This briefing packet is generated to assist your discussion with a qualified advocate/attorney.');
+
+    const dateStr = new Date().toLocaleDateString(isHi ? 'hi-IN' : 'en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+
+    const htmlContent = `<!DOCTYPE html>
+<html lang="${isHi ? 'hi' : 'en'}">
+<head>
+  <meta charset="utf-8">
+  <title>${docTitle.replace(/\s+/g, '_')}_Lawyer_Briefing_Packet</title>
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 15mm 15mm 15mm 15mm;
+    }
+    * {
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #1E1B17;
+      background-color: #FFFFFF;
+      margin: 0;
+      padding: 0;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .header {
+      border-bottom: 2px solid #B85C38;
+      padding-bottom: 12px;
+      margin-bottom: 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+    .brand {
+      font-size: 18px;
+      font-weight: 800;
+      color: #1E1B17;
+      letter-spacing: -0.3px;
+    }
+    .brand span {
+      color: #B85C38;
+    }
+    .brand-sub {
+      font-size: 11px;
+      color: #6E6659;
+      font-weight: 500;
+      margin-top: 2px;
+    }
+    .doc-meta {
+      text-align: right;
+    }
+    .doc-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #1E1B17;
+    }
+    .date-stamp {
+      font-size: 11px;
+      color: #6E6659;
+      margin-top: 2px;
+    }
+    .risk-badge {
+      display: inline-block;
+      padding: 3px 9px;
+      border-radius: 6px;
+      font-weight: 700;
+      font-size: 11px;
+      margin-top: 4px;
+    }
+    .risk-high { background-color: #FEE2E2; color: #991B1B; border: 1px solid #FCA5A5; }
+    .risk-medium { background-color: #FEF3C7; color: #92400E; border: 1px solid #FCD34D; }
+    .risk-low { background-color: #D1FAE5; color: #065F46; border: 1px solid #6EE7B7; }
+
+    .summary-box {
+      background-color: #F6F1E7;
+      border: 1px solid #E7E1D3;
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-bottom: 20px;
+      page-break-inside: avoid;
+    }
+    .summary-title {
+      margin: 0 0 6px 0;
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #6E6659;
+    }
+    .summary-text {
+      margin: 0;
+      color: #1E1B17;
+      line-height: 1.5;
+    }
+
+    .section {
+      margin-bottom: 20px;
+    }
+    .section-title {
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid #E7E1D3;
+      margin-bottom: 10px;
+      page-break-after: avoid;
+    }
+    .title-red { color: #991B1B; }
+    .title-orange { color: #B85C38; }
+    .title-gray { color: #475569; }
+
+    .issue-card {
+      background-color: #FFF5F5;
+      border: 1px solid #FCA5A5;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+      page-break-inside: avoid;
+    }
+    .issue-title {
+      font-weight: 700;
+      color: #991B1B;
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .issue-concern {
+      color: #1E1B17;
+      margin-bottom: 6px;
+    }
+    .issue-edit {
+      background-color: #FBF8F1;
+      border: 1px solid #E7E1D3;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-family: monospace;
+      font-size: 11px;
+      color: #065F46;
+    }
+
+    .list-box {
+      background-color: #F6F1E7;
+      border: 1px solid #E7E1D3;
+      border-radius: 8px;
+      padding: 12px 14px;
+      page-break-inside: avoid;
+    }
+    .list-item {
+      display: flex;
+      align-items: flex-start;
+      margin-bottom: 8px;
+    }
+    .list-item:last-child {
+      margin-bottom: 0;
+    }
+    .bullet {
+      color: #B85C38;
+      font-weight: bold;
+      margin-right: 8px;
+      font-size: 14px;
+      line-height: 1.2;
+    }
+    .item-text {
+      color: #1E1B17;
+      flex: 1;
+    }
+
+    .empty-note {
+      color: #065F46;
+      font-size: 12px;
+      font-style: italic;
+    }
+
+    .footer {
+      margin-top: 24px;
+      padding-top: 10px;
+      border-top: 1px solid #E7E1D3;
+      font-size: 10px;
+      color: #6E6659;
+      text-align: center;
+      page-break-inside: avoid;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="brand">LegalLens <span>Briefing</span></div>
+      <div class="brand-sub">${isHi ? 'अधिवक्ता परामर्श दस्तावेज़' : 'Advocate Consultation Packet'}</div>
+    </div>
+    <div class="doc-meta">
+      <div class="doc-title">${docTitle}</div>
+      <div class="date-stamp">${dateStr}</div>
+      <div class="risk-badge ${riskBadgeClass}">${riskText}</div>
+    </div>
+  </div>
+
+  ${summaryText ? `
+  <div class="summary-box">
+    <div class="summary-title">${isHi ? 'दस्तावेज़ का संक्षिप्त सारांश' : 'Executive Document Summary'}</div>
+    <p class="summary-text">${summaryText}</p>
+  </div>
+  ` : ''}
+
+  <div class="section">
+    <div class="section-title title-red">${isHi ? 'चिह्नित उच्च-जोखिम के मुद्दे' : 'Flagged High-Risk Issues'} (${allFlagged.length})</div>
+    ${allFlagged.length > 0 ? allFlagged.map((issue) => `
+      <div class="issue-card">
+        <div class="issue-title">⚠️ ${issue.clause_title}</div>
+        <div class="issue-concern">${issue.concern}</div>
+        ${issue.suggested_clause_edit ? `<div class="issue-edit">${isHi ? 'अनुशंसित संशोधन' : 'Suggested Edit'}: ${issue.suggested_clause_edit}</div>` : ''}
+      </div>
+    `).join('') : `
+      <div class="list-box">
+        <div class="empty-note">
+          ${isHi ? 'इस समझौते में कोई उच्च-जोखिम वाला मुद्दा नहीं पाया गया।' : 'No high-risk issues flagged in this agreement.'}
+        </div>
+      </div>
+    `}
+  </div>
+
+  <div class="section">
+    <div class="section-title title-orange">${isHi ? 'आपके अधिवक्ता से पूछने के लिए तैयार प्रश्न' : 'Ready-to-Ask Questions for Your Advocate'} (${questions.length})</div>
+    <div class="list-box">
+      ${questions.length > 0 ? questions.map((q) => `
+        <div class="list-item">
+          <span class="bullet">❓</span>
+          <span class="item-text">${q}</span>
+        </div>
+      `).join('') : `
+        <div class="empty-note">
+          ${isHi ? 'कोई विशिष्ट प्रश्न आवश्यक नहीं हैं — यह समझौता स्पष्ट प्रतीत होता है।' : 'No specific questions flagged for this agreement.'}
+        </div>
+      `}
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title title-gray">${isHi ? 'गायब सुरक्षात्मक धाराएं' : 'Missing Protective Clauses'} (${missingClauses.length})</div>
+    <div class="list-box">
+      ${missingClauses.length > 0 ? missingClauses.map((m) => `
+        <div class="list-item">
+          <span class="bullet">📄</span>
+          <span class="item-text">${m}</span>
+        </div>
+      `).join('') : `
+        <div class="empty-note">
+          ${isHi ? 'इस दस्तावेज़ में कोई महत्वपूर्ण सुरक्षात्मक धाराएँ गायब नहीं मिलीं।' : 'No missing protective clauses detected for this document.'}
+        </div>
+      `}
+    </div>
+  </div>
+
+  <div class="footer">
+    <div>LegalLens AI Legal Assistant • ${isHi ? 'अधिवक्ता ब्रीफिंग पैकेट' : 'Lawyer Briefing Packet'} • ${dateStr}</div>
+    <div style="margin-top: 4px;">${disclaimerText}</div>
+  </div>
+</body>
+</html>`;
+
+    const iframe = window.document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    window.document.body.appendChild(iframe);
+
+    const iframeDoc = iframe.contentWindow?.document;
+    if (iframeDoc) {
+      iframeDoc.open();
+      iframeDoc.write(htmlContent);
+      iframeDoc.close();
+
+      setTimeout(() => {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+        setTimeout(() => {
+          if (window.document.body.contains(iframe)) {
+            window.document.body.removeChild(iframe);
+          }
+        }, 1000);
+      }, 250);
+    }
   };
 
   return (
