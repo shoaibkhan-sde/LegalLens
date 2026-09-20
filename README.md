@@ -44,13 +44,17 @@ LegalLens bridges the severe information asymmetry between individuals and contr
 
 ## 🌟 Key Features & Pipeline Architecture
 
+```mermaid
+flowchart LR
+    A["Document Input (PDF/DOCX/TXT/Image)"] --> B{"Stage 0: Guard 1 Gate"}
+    B -- "Non-Legal / Exam / Recipe" --> C["Rejected (Graceful Stop)"]
+    B -- "Legal Contract" --> D["Stage 1: OCR & Parsing"]
+    D --> E["Stage 2: Clause Chunking"]
+    E --> F["Stage 3: Risk Tagging"]
+    F --> G["Stage 4: AI Synthesis"]
+    G --> H["Interactive UI & Outputs"]
 ```
-[Document Input] ──► (Stage 0: Guard 1 Gate) ──► (Stage 1: OCR & Parsing) ──► (Stage 2: Clause Chunking)
-                             │
-                             ├──► Rejected (Non-Legal/Exam/Recipe) ──► [Graceful Stop]
-                             │
-                             └──► (Stage 3: Risk Tagging) ──► (Stage 4: AI Synthesis) ──► [Interactive UI & Outputs]
-```
+
 
 ### 1. Hardened 5-Stage Core Processing Pipeline
 - **Stage 0 — Guard 1 Input Gate**: Deterministic rules + fast AI classifier validate content before entering the LLM pipeline. Non-legal content (exam papers, recipes, random photos, code logs) is rejected immediately at Stage 0 without wasting LLM tokens.
