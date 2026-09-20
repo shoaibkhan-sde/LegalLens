@@ -8,7 +8,7 @@
 [![Vite](https://img.shields.io/badge/Vite-5.x-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vitejs.dev/)
 [![TailwindCSS](https://img.shields.io/badge/TailwindCSS-4.x-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
-[![Google Gemini & Groq](https://img.shields.io/badge/AI-Gemini_2.5_%26_Groq_Dual_Engine-8E75C2?style=flat-square&logo=googlegemini&logoColor=white)](https://ai.google.dev/)
+[![Groq AI](https://img.shields.io/badge/AI-Groq_Llama_3.3_70B-8E75C2?style=flat-square)](https://groq.com/)
 [![Bilingual](https://img.shields.io/badge/Bilingual-English_%26_%E0%A4%B9%E0%A4%BF%E0%A4%82%E0%A4%A6%E0%A5%80-FF9933?style=flat-square)](https://github.com/)
 [![Tests](https://img.shields.io/badge/Tests-100%25%20Passing%20(58%2F58)-success?style=flat-square)](https://github.com/)
 
@@ -80,7 +80,7 @@ LegalLens bridges the severe information asymmetry between individuals and contr
 
 * **Frontend**: React 18, TypeScript 5, Vite 5, TailwindCSS 4, Lucide React Icons
 * **Backend**: Node.js, Express, TypeScript, Multer, Helmet, Express-Rate-Limit
-* **AI & Document Parsing**: Google Gemini 2.5 Flash, Groq Dual Engine (`llama-3.3-70b`, `gpt-oss-120b`), `pdf-parse`, `pdf-lib`, `mammoth` (DOCX parser), Zlib FlateDecode OCR fallback
+* **AI & Document Parsing**: Groq Llama 3.3 70B Engine (`llama-3.3-70b`, `deepseek-r1-distill-llama-70b`), `pdf-parse`, `pdf-lib`, `mammoth` (DOCX parser), Zlib FlateDecode OCR fallback
 * **Calendar & Printing**: RFC 5545 iCalendar (`text/calendar`), Scoped HTML iframe printing engine
 * **Internationalization**: React Context (`LanguageContext`), i18n JSON locales for English (`en.json`) and Hindi (`hi.json`)
 
@@ -112,7 +112,6 @@ Create a `.env` file inside the `server/` directory:
 ```env
 PORT=3001
 GROQ_API_KEY=your_groq_api_key_here
-GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
 ### 3. Run Development Server
