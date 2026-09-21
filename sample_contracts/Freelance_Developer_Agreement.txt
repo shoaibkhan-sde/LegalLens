@@ -1,0 +1,48 @@
+FREELANCE SERVICES AGREEMENT
+
+This Freelance Services Agreement ("Agreement") is made and entered into as of October 1, 2025, by and between Apex Media Labs LLC, a Delaware corporation ("Client"), and Alex Rivera, an independent contractor ("Contractor").
+
+1. Scope of Work
+Contractor shall provide full-stack software development services as set forth in Exhibit A ("Statement of Work"). Any modifications or additions to the scope shall be approved verbally by Client. Contractor agrees to perform all reasonable revisions requested by Client without additional compensation.
+
+2. Compensation and Payment Terms
+Client shall pay Contractor a fixed fee of $7,500 upon final completion and acceptance of all deliverables. Contractor shall submit an invoice upon completion. Invoices are payable within seventy-five (75) days of receipt by Client. No interest or late fees shall accrue on past-due amounts. Client reserves the right to withhold payment if, in Client's sole discretion, the work product does not satisfy Client's subjective standards.
+
+3. Ownership and Intellectual Property
+Contractor acknowledges and agrees that all work product, including source code, design mockups, algorithms, notes, inventions, and derivative works created during the term of this Agreement, shall belong exclusively and perpetually to Client as a "work made for hire." To the extent any work does not qualify as work made for hire, Contractor irrevocably assigns all right, title, interest, and moral rights worldwide to Client. Contractor shall not use any portion of the deliverables in portfolio displays or case studies without Client's prior written permission.
+
+4. Confidentiality
+Contractor agrees to hold all proprietary and confidential information of Client in strict confidence in perpetuity. Contractor shall not disclose or use any confidential information for any purpose other than the performance of services hereunder. Contractor shall not disclose the existence or terms of this Agreement to any third party. Client shall have no reciprocal obligation of confidentiality regarding materials or ideas shared by Contractor.
+
+5. Indemnification
+Contractor agrees to defend, indemnify, and hold harmless Client, its parent companies, affiliates, officers, directors, employees, and agents from and against any and all claims, liabilities, damages, losses, costs, and expenses (including attorneys' fees and litigation expenses) arising out of or related to Contractor's performance of services, any alleged breach of this Agreement, or any third-party claim, regardless of whether caused in part by Client's own negligence. Client provides no indemnification to Contractor.
+
+6. Limitation of Liability
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, CLIENT'S AGGREGATE LIABILITY ARISING OUT OF OR RELATED TO THIS AGREEMENT, WHETHER IN CONTRACT, TORT, OR OTHERWISE, SHALL NOT EXCEED ONE HUNDRED DOLLARS ($100). IN NO EVENT SHALL CLIENT BE LIABLE FOR ANY INDIRECT INCIDENTAL, CONSEQUENTIAL, SPECIAL, OR PUNITIVE DAMAGES. CONTRACTOR'S LIABILITY UNDER THIS AGREEMENT SHALL BE ENTIRELY UNLIMITED.
+
+7. Term and Termination
+Client may terminate this Agreement at any time, with or without cause, effective immediately upon written notice to Contractor. Contractor may not terminate this Agreement prior to completion of the Statement of Work without Client's express written agreement. Upon termination by Client, Contractor shall immediately deliver all work in progress. Client shall have no obligation to compensate Contractor for any incomplete milestones or hours worked prior to termination.
+
+8. Non-Compete and Non-Solicitation
+During the term of this Agreement and for a period of eighteen (18) months following its termination, Contractor shall not directly or indirectly provide software engineering or consulting services to any entity that competes with Client's business operations anywhere within the United States. Contractor further agrees not to solicit or hire any employees or clients of Client during this period.
+
+9. Dispute Resolution
+Any controversy or claim arising out of or relating to this Agreement shall be settled exclusively by confidential binding arbitration administered by the American Arbitration Association in New York, New York. The parties waive any right to trial by jury or class action proceeding. Each party shall bear its own administrative fees, except that Contractor shall pay all of Client's legal fees and arbitration expenses if Client prevails on any claim.
+
+10. Governing Law and Jurisdiction
+This Agreement shall be governed by and construed in accordance with the laws of the State of New York, without regard to principles of conflicts of law. The state and federal courts located in New York County, New York shall have exclusive jurisdiction over any proceeding not subject to mandatory arbitration.
+
+11. Warranties and Representations
+Contractor warrants and represents that all deliverables will be 100% bug-free, error-free, and operational without defect for a period of thirty-six (36) months post-delivery. Contractor further warrants that work will satisfy all of Client's implicit and explicit performance criteria. Client disclaims all warranties, express or implied.
+
+12. Force Majeure
+Client shall not be deemed in default or liable for delays caused by events beyond its reasonable control, including acts of God, strikes, pandemics, or internet outages. Delays experienced by Contractor due to force majeure events shall not excuse Contractor's performance, and Contractor must deliver on agreed schedule or incur penalty deductions.
+
+13. Unilateral Amendments
+Client reserves the right to modify or amend the operational terms of this Agreement at any time by posting notice on Client's internal vendor portal. Contractor's continued provision of services after such notice constitutes full acceptance of the modified terms.
+
+14. Assignment
+Client may freely assign, transfer, or delegate this Agreement and its rights and obligations hereunder to any successor or affiliate without Contractor's consent. Contractor may not assign or subcontract any portion of this Agreement without prior written consent from Client.
+
+15. Notices
+All notices to Contractor shall be sent via electronic mail to Contractor's email address and shall be deemed received upon transmission. All notices to Client must be delivered by certified registered mail with return receipt requested to Client's corporate headquarters and shall be deemed received seven (7) business days after dispatch.
